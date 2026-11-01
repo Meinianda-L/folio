@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { basicSetup } from 'codemirror';
-import { EditorState, EditorSelection, Prec } from '@codemirror/state';
+import { EditorState, EditorSelection, Prec, Compartment } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { StreamLanguage, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
-import { snippetCompletion } from '@codemirror/autocomplete';
+import { snippetCompletion, startCompletion } from '@codemirror/autocomplete';
+import { toggleComment } from '@codemirror/commands';
+import * as pdfjs from 'pdfjs-dist';
 import { diffLines } from 'diff';
 import english from './locale/en.json';
 import chinese from './locale/zh.json';
@@ -105,6 +107,24 @@ const ICONS = {
   'dock-bottom': 'M4 5h16v14H4zM4 14h16',
   'dock-float': 'M4 5h16v14H4zM11 11h7v6h-7z',
   import: 'M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M4.5 14v4A1.5 1.5 0 0 0 6 19.5h12a1.5 1.5 0 0 0 1.5-1.5v-4',
+  list: 'M9.5 6.5h10M9.5 12h10M9.5 17.5h10M5 6.5h.01M5 12h.01M5 17.5h.01',
+  'list-ol': 'M10 6.5h10M10 12h10M10 17.5h10M4 5l1.5-1v4.5M3.8 13.2c.4-.8 2.4-.9 2.4.3 0 .9-2.4 1.6-2.4 3h2.5',
+  table: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14',
+  quote: 'M6 7h4v4c0 2.8-1.2 4.6-4 5.5M14 7h4v4c0 2.8-1.2 4.6-4 5.5',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
+  tag: 'M4 4h7l9 9-7 7-9-9zM8.5 8.5h.01',
+  locate: 'M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z',
+  'zoom-in': 'M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM20 20l-4.8-4.8M10.5 7.5v6M7.5 10.5h6',
+  'zoom-out': 'M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM20 20l-4.8-4.8M7.5 10.5h6',
+  'fit-width': 'M4 12h16M7.5 8.5 4 12l3.5 3.5M16.5 8.5 20 12l-3.5 3.5',
+  'fit-page': 'M6.5 4h11v16h-11zM9.5 9 12 6.5 14.5 9M9.5 15l2.5 2.5 2.5-2.5',
+  minus: 'M5.5 12h13',
+  copy: 'M8.5 8.5h10v10h-10zM5.5 15.5v-10h10',
+  cut: 'M6.5 8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM6.5 20.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM8.6 7.4 19 18M8.6 16.6 19 6',
+  paste: 'M8.5 5H6v15.5h12V5h-2.5M9 3.5h6v3H9z',
+  heading: 'M6.5 5v14M17.5 5v14M6.5 12h11',
+  external: 'M14 4h6v6M20 4l-9 9M18 14v5.5H4.5V6H10',
+  layout: 'M4 5h16v14H4zM9.5 5v14M15 5v14',
   gear: 'M12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2.1-1.2L14 3.2h-4l-.5 2.4a7 7 0 0 0-2.1 1.2l-2.3-.9-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2.1 1.2l.5 2.4h4l.5-2.4a7 7 0 0 0 2.1-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z'
 };
 function Icon({ name, size = 16, fill = false }) {
@@ -231,15 +251,15 @@ const latexHighlight = HighlightStyle.define([
   { tag: tags.bracket, color: 'var(--fo-syn-bracket)' }
 ]);
 const editorTheme = EditorView.theme({
-  '&': { height: '100%', fontSize: '13.5px', color: 'var(--fo-ink)', backgroundColor: 'var(--fo-surface)' },
-  '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--fo-mono)', lineHeight: '1.75' },
+  '&': { height: '100%', fontSize: 'var(--fo-ed-size, 13.5px)', color: 'var(--fo-ed-fg, var(--fo-ink))', backgroundColor: 'var(--fo-ed-bg, var(--fo-surface))' },
+  '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--fo-ed-font, var(--fo-mono))', lineHeight: '1.75' },
   '.cm-content': { padding: '18px 0 40vh', caretColor: 'var(--fo-accent)' },
   '.cm-line': { padding: '0 22px 0 14px' },
-  '.cm-gutters': { backgroundColor: 'var(--fo-surface)', border: 'none', color: 'var(--fo-faint)', paddingLeft: '8px' },
+  '.cm-gutters': { backgroundColor: 'var(--fo-ed-bg, var(--fo-surface))', border: 'none', color: 'var(--fo-ed-gutter, var(--fo-faint))', paddingLeft: '8px' },
   '.cm-activeLine': { backgroundColor: 'var(--fo-active-line)' },
-  '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--fo-ink)' },
+  '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--fo-ed-fg, var(--fo-ink))' },
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: 'var(--fo-selection) !important' },
-  '.cm-cursor': { borderLeftColor: 'var(--fo-accent)', borderLeftWidth: '2px' },
+  '.cm-cursor': { borderLeftColor: 'var(--fo-ed-caret, var(--fo-accent))', borderLeftWidth: '2px' },
   '.cm-matchingBracket': { backgroundColor: 'var(--fo-accent-soft)', outline: 'none' },
   '.cm-searchMatch': { backgroundColor: 'var(--fo-accent-soft)' },
   '.cm-tooltip': { border: '1px solid var(--fo-line)', backgroundColor: 'var(--fo-raised)', borderRadius: '8px', overflow: 'hidden', boxShadow: 'var(--fo-shadow)' },
@@ -249,17 +269,145 @@ const editorTheme = EditorView.theme({
   '&.cm-focused': { outline: 'none' }
 });
 
-function SourceEditor({ docKey, content, onChange, onCursor, onSave, onCompile, apiRef }) {
+/* ───────────── editor settings and LaTeX actions ───────────── */
+
+const EDITOR_KEY = 'folio-editor-v1';
+const EDITOR_DEFAULTS = { size: 13.5, font: 'default', theme: 'harness', wrap: true, toolbar: true };
+const EDITOR_FONTS = [['default', 'System mono', 'var(--fo-mono)'], ['menlo', 'Menlo', 'Menlo, var(--fo-mono)'], ['sf', 'SF Mono', '"SF Mono", var(--fo-mono)'], ['jetbrains', 'JetBrains Mono', '"JetBrains Mono", var(--fo-mono)'], ['fira', 'Fira Code', '"Fira Code", var(--fo-mono)'], ['courier', 'Courier New', '"Courier New", monospace']];
+// Each palette sets the editor surface and syntax colors; Harness follows the host's light or dark theme.
+const EDITOR_THEMES = [
+  ['harness', 'Harness', null],
+  ['github', 'GitHub', { bg: '#ffffff', fg: '#1f2328', gutter: '#8c959f', active: '#f6f8fa', selection: '#cfe3ff', caret: '#0969da', comment: '#6e7781', command: '#cf222e', heading: '#0550ae', env: '#8250df', meta: '#953800', math: '#0a3069', ref: '#116329', arg: '#0a3069', bracket: '#8c959f' }],
+  ['solarized', 'Solarized', { bg: '#fdf6e3', fg: '#586e75', gutter: '#93a1a1', active: '#f5efdc', selection: '#eee8d5', caret: '#268bd2', comment: '#93a1a1', command: '#268bd2', heading: '#cb4b16', env: '#6c71c4', meta: '#d33682', math: '#2aa198', ref: '#859900', arg: '#b58900', bracket: '#93a1a1' }],
+  ['paper', 'Paper', { bg: '#f8f5ee', fg: '#2f2b26', gutter: '#a39d92', active: '#f1ece1', selection: '#e3dccb', caret: '#9a3412', comment: '#9b958a', command: '#9a3412', heading: '#1e3a8a', env: '#6d28d9', meta: '#b45309', math: '#0f766e', ref: '#3f6212', arg: '#7c2d12', bracket: '#a39d92' }],
+  ['onedark', 'One Dark', { dark: true, bg: '#282c34', fg: '#abb2bf', gutter: '#5c6370', active: '#2c313c', selection: '#3e4451', caret: '#528bff', comment: '#7f848e', command: '#c678dd', heading: '#e5c07b', env: '#61afef', meta: '#d19a66', math: '#56b6c2', ref: '#98c379', arg: '#e06c75', bracket: '#7f848e' }],
+  ['dracula', 'Dracula', { dark: true, bg: '#282a36', fg: '#f8f8f2', gutter: '#6272a4', active: '#323444', selection: '#44475a', caret: '#f8f8f0', comment: '#6272a4', command: '#ff79c6', heading: '#bd93f9', env: '#8be9fd', meta: '#ffb86c', math: '#50fa7b', ref: '#f1fa8c', arg: '#f1fa8c', bracket: '#6272a4' }],
+  ['nord', 'Nord', { dark: true, bg: '#2e3440', fg: '#d8dee9', gutter: '#4c566a', active: '#343b48', selection: '#434c5e', caret: '#88c0d0', comment: '#616e88', command: '#81a1c1', heading: '#88c0d0', env: '#b48ead', meta: '#d08770', math: '#a3be8c', ref: '#8fbcbb', arg: '#ebcb8b', bracket: '#616e88' }]
+];
+const clampSize = size => Math.max(9, Math.min(28, Math.round(size * 2) / 2));
+function editorStyle(settings) {
+  const palette = EDITOR_THEMES.find(([id]) => id === settings.theme)?.[2];
+  const style = { '--fo-ed-size': `${settings.size}px`, '--fo-ed-font': (EDITOR_FONTS.find(([id]) => id === settings.font) || EDITOR_FONTS[0])[2] };
+  if (!palette) return style;
+  return { ...style, colorScheme: palette.dark ? 'dark' : 'light', '--fo-ed-bg': palette.bg, '--fo-ed-fg': palette.fg, '--fo-ed-gutter': palette.gutter, '--fo-ed-caret': palette.caret, '--fo-active-line': palette.active, '--fo-selection': palette.selection,
+    ...Object.fromEntries(['comment', 'command', 'heading', 'env', 'meta', 'math', 'ref', 'arg', 'bracket'].map(key => [`--fo-syn-${key}`, palette[key]])) };
+}
+
+// Wrap each selection in `before`/`after`, or unwrap it when it is already wrapped.
+function wrapWith(view, before, after) {
+  const { state } = view;
+  view.dispatch(state.changeByRange(range => {
+    const text = state.sliceDoc(range.from, range.to);
+    if (range.from >= before.length && state.sliceDoc(range.from - before.length, range.from) === before && state.sliceDoc(range.to, range.to + after.length) === after)
+      return { changes: [{ from: range.from - before.length, to: range.from }, { from: range.to, to: range.to + after.length }], range: EditorSelection.range(range.from - before.length, range.to - before.length) };
+    return { changes: { from: range.from, to: range.to, insert: before + text + after }, range: EditorSelection.range(range.from + before.length, range.from + before.length + text.length) };
+  }), { scrollIntoView: true, userEvent: 'input' });
+  view.focus();
+}
+// Put `before` + selection + `after` on lines of their own, indented like the current line.
+function insertBlock(view, before, after) {
+  const { state } = view;
+  const range = state.selection.main;
+  const line = state.doc.lineAt(range.from);
+  const indent = /^\s*/.exec(line.text)[0];
+  const indented = text => text.replace(/\n/g, `\n${indent}`);
+  const head = (state.sliceDoc(line.from, range.from).trim() ? `\n${indent}` : '') + indented(before);
+  const body = indented(state.sliceDoc(range.from, range.to));
+  const tail = indented(after) + (state.sliceDoc(range.to, state.doc.lineAt(range.to).to).trim() ? `\n${indent}` : '');
+  view.dispatch({ changes: { from: range.from, to: range.to, insert: head + body + tail }, selection: EditorSelection.cursor(range.from + head.length + body.length), scrollIntoView: true, userEvent: 'input' });
+  view.focus();
+}
+const thenComplete = run => view => { run(view); if (view.state.selection.main.empty) startCompletion(view); };
+// Formatting and insertion commands shared by the toolbar, the right-click menu and shortcuts.
+function latexActions(t) {
+  return {
+    bold: { title: t('fmtBold'), glyph: 'B', glyphClass: 'is-bold', hint: `${MOD}B`, run: view => wrapWith(view, '\\textbf{', '}') },
+    italic: { title: t('fmtItalic'), glyph: 'I', glyphClass: 'is-italic', hint: `${MOD}I`, run: view => wrapWith(view, '\\textit{', '}') },
+    underline: { title: t('fmtUnderline'), glyph: 'U', glyphClass: 'is-underline', run: view => wrapWith(view, '\\underline{', '}') },
+    mono: { title: t('fmtMono'), glyph: 'T', glyphClass: 'is-mono', run: view => wrapWith(view, '\\texttt{', '}') },
+    chapter: { title: t('hChapter'), glyph: 'Ch', run: view => wrapWith(view, '\\chapter{', '}') },
+    section: { title: t('hSection'), glyph: 'H1', run: view => wrapWith(view, '\\section{', '}') },
+    subsection: { title: t('hSubsection'), glyph: 'H2', run: view => wrapWith(view, '\\subsection{', '}') },
+    subsubsection: { title: t('hSubsubsection'), glyph: 'H3', run: view => wrapWith(view, '\\subsubsection{', '}') },
+    paragraph: { title: t('hParagraph'), glyph: '¶', run: view => wrapWith(view, '\\paragraph{', '}') },
+    math: { title: t('fmtMath'), glyph: '$x$', glyphClass: 'is-math', run: view => wrapWith(view, '$', '$') },
+    equation: { title: t('fmtEquation'), glyph: 'Σ', run: view => insertBlock(view, '\\begin{equation}\n  ', '\n\\end{equation}') },
+    align: { title: t('fmtAlign'), glyph: '≡', run: view => insertBlock(view, '\\begin{align}\n  ', '\n\\end{align}') },
+    itemize: { title: t('fmtItemize'), icon: 'list', run: view => insertBlock(view, '\\begin{itemize}\n  \\item ', '\n\\end{itemize}') },
+    enumerate: { title: t('fmtEnumerate'), icon: 'list-ol', run: view => insertBlock(view, '\\begin{enumerate}\n  \\item ', '\n\\end{enumerate}') },
+    figure: { title: t('fmtFigure'), icon: 'image', run: thenComplete(view => insertBlock(view, '\\begin{figure}[htbp]\n  \\centering\n  \\includegraphics[width=0.8\\linewidth]{', '}\n  \\caption{}\n  \\label{fig:}\n\\end{figure}')) },
+    table: { title: t('fmtTable'), icon: 'table', run: view => insertBlock(view, '\\begin{table}[htbp]\n  \\centering\n  \\caption{', '}\n  \\label{tab:}\n  \\begin{tabular}{lll}\n    \\hline\n    A & B & C \\\\\n    \\hline\n     &  &  \\\\\n    \\hline\n  \\end{tabular}\n\\end{table}') },
+    cite: { title: t('fmtCite'), icon: 'quote', run: thenComplete(view => wrapWith(view, '\\cite{', '}')) },
+    ref: { title: t('fmtRef'), icon: 'link', run: thenComplete(view => wrapWith(view, '\\ref{', '}')) },
+    label: { title: t('fmtLabel'), icon: 'tag', run: view => wrapWith(view, '\\label{', '}') },
+    footnote: { title: t('fmtFootnote'), glyph: 'ⁿ', run: view => wrapWith(view, '\\footnote{', '}') },
+    comment: { title: t('fmtComment'), glyph: '%', glyphClass: 'is-mono', hint: `${MOD}/`, run: view => { toggleComment(view); view.focus(); } }
+  };
+}
+const TOOLBAR_GROUPS = [['bold', 'italic', 'underline', 'mono'], ['heading'], ['math', 'equation', 'align'], ['itemize', 'enumerate'], ['figure', 'table'], ['cite', 'ref', 'label', 'footnote'], ['comment']];
+const HEADINGS = ['chapter', 'section', 'subsection', 'subsubsection', 'paragraph'];
+
+function LatexToolbar({ t, apiRef, settingsOpen, onSettings, onShowInPdf, canSync }) {
+  const actions = useMemo(() => latexActions(t), [t]);
+  const [headingMenu, setHeadingMenu] = useState(null);
+  const run = action => { const view = apiRef.current?.view; if (view) action.run(view); };
+  const tool = id => { const action = actions[id]; return <button key={id} className="fo-tool" title={action.hint ? `${action.title} (${action.hint})` : action.title} aria-label={action.title} onMouseDown={event => event.preventDefault()} onClick={() => run(action)}>{action.icon ? <Icon name={action.icon} size={15} /> : <span className={`fo-glyph ${action.glyphClass || ''}`}>{action.glyph}</span>}</button>; };
+  return <div className="fo-texbar" role="toolbar" aria-label={t('formatting')}>
+    {TOOLBAR_GROUPS.map((group, i) => <div key={i} className="fo-texbar-group">{group.map(id => id === 'heading'
+      ? <button key={id} className="fo-tool fo-tool-wide" title={t('fmtHeading')} onMouseDown={event => event.preventDefault()} onClick={event => { const box = event.currentTarget.getBoundingClientRect(); setHeadingMenu({ position: 'fixed', left: box.left, top: box.bottom + 4 }); }}><Icon name="heading" size={15} /><Icon name="chevron" size={11} /></button>
+      : tool(id))}</div>)}
+    <span className="fo-spacer" />
+    <div className="fo-texbar-group">
+      <button className="fo-tool" title={t('showInPdf')} aria-label={t('showInPdf')} disabled={!canSync} onMouseDown={event => event.preventDefault()} onClick={onShowInPdf}><Icon name="locate" size={15} /></button>
+      <button className={`fo-tool ${settingsOpen ? 'is-on' : ''}`} data-editor-settings title={t('editorSettings')} aria-label={t('editorSettings')} aria-expanded={settingsOpen} onClick={onSettings}><Icon name="gear" size={15} /></button>
+    </div>
+    {headingMenu && <Menu anchor={headingMenu} onClose={() => setHeadingMenu(null)} items={HEADINGS.map(id => ({ label: actions[id].title, run: () => run(actions[id]) }))} />}
+  </div>;
+}
+
+function EditorSettings({ t, settings, onChange, onClose }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const listener = event => { if (!ref.current?.contains(event.target) && !event.target.closest?.('[data-editor-settings]')) onClose(); };
+    const key = event => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('pointerdown', listener); window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('pointerdown', listener); window.removeEventListener('keydown', key); };
+  }, []);
+  return <div className="fo-popover fo-ed-settings" ref={ref} role="dialog" aria-label={t('editorSettings')}>
+    <div className="fo-ed-line"><span>{t('fontSize')}</span><div className="fo-stepper">
+      <button aria-label={t('zoomOut')} onClick={() => onChange({ size: clampSize(settings.size - 1) })}><Icon name="minus" size={14} /></button>
+      <output>{settings.size}</output>
+      <button aria-label={t('zoomIn')} onClick={() => onChange({ size: clampSize(settings.size + 1) })}><Icon name="plus" size={14} /></button>
+    </div></div>
+    <label className="fo-field"><span>{t('font')}</span><select value={settings.font} onChange={event => onChange({ font: event.target.value })}>{EDITOR_FONTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+    <div className="fo-ed-themes"><span>{t('colorTheme')}</span><div>{EDITOR_THEMES.map(([id, label, palette]) => <button key={id} className={settings.theme === id ? 'is-selected' : ''} aria-pressed={settings.theme === id} onClick={() => onChange({ theme: id })}>
+      <span className="fo-swatch" style={{ background: palette?.bg || 'var(--fo-surface)', color: palette?.fg || 'var(--fo-ink)' }}>{['command', 'env', 'math'].map(key => <i key={key} style={{ background: palette?.[key] || `var(--fo-syn-${key})` }} />)}</span>{label}
+    </button>)}</div></div>
+    <label className="fo-switch"><input type="checkbox" checked={settings.wrap} onChange={event => onChange({ wrap: event.target.checked })} /><span />{t('wrapLines')}</label>
+    <label className="fo-switch"><input type="checkbox" checked={settings.toolbar} onChange={event => onChange({ toolbar: event.target.checked })} /><span />{t('showToolbar')}</label>
+    <small className="fo-muted">{t('editorZoomHint')}</small>
+  </div>;
+}
+
+function SourceEditor({ docKey, content, onChange, onCursor, onSave, onCompile, apiRef, settings, style, onZoom, onContextMenu, t }) {
   const host = useRef(null);
-  const handlers = useRef({}); handlers.current = { onChange, onCursor, onSave, onCompile };
+  const wrapping = useRef(new Compartment());
+  const handlers = useRef({}); handlers.current = { onChange, onCursor, onSave, onCompile, onZoom, onContextMenu };
+  const viewRef = useRef(null);
+  const actions = useMemo(() => latexActions(t), [t]);
   useEffect(() => {
     if (!host.current) return;
     const view = new EditorView({ parent: host.current, state: EditorState.create({ doc: content, extensions: [
       Prec.high(keymap.of([
         { key: 'Mod-s', preventDefault: true, run: () => { handlers.current.onSave(); return true; } },
-        { key: 'Mod-Enter', preventDefault: true, run: () => { handlers.current.onCompile(); return true; } }
+        { key: 'Mod-Enter', preventDefault: true, run: () => { handlers.current.onCompile(); return true; } },
+        { key: 'Mod-b', preventDefault: true, run: target => { actions.bold.run(target); return true; } },
+        { key: 'Mod-i', preventDefault: true, run: target => { actions.italic.run(target); return true; } },
+        { key: 'Mod-=', preventDefault: true, run: () => { handlers.current.onZoom(1); return true; } },
+        { key: 'Mod--', preventDefault: true, run: () => { handlers.current.onZoom(-1); return true; } },
+        { key: 'Mod-0', preventDefault: true, run: () => { handlers.current.onZoom(0); return true; } }
       ])),
-      basicSetup, latexLanguage, syntaxHighlighting(latexHighlight), editorTheme, EditorView.lineWrapping,
+      basicSetup, latexLanguage, syntaxHighlighting(latexHighlight), editorTheme, wrapping.current.of(settings.wrap ? EditorView.lineWrapping : []),
       EditorView.updateListener.of(update => {
         if (update.docChanged) handlers.current.onChange(update.state.doc.toString());
         if (update.docChanged || update.selectionSet) {
@@ -269,7 +417,21 @@ function SourceEditor({ docKey, content, onChange, onCursor, onSave, onCompile, 
         }
       })
     ] }) });
+    viewRef.current = view;
+    // Pinch or Ctrl/⌘ + scroll over the source changes the font size.
+    let pending = 0;
+    const wheel = event => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      pending -= event.deltaY;
+      if (Math.abs(pending) >= 24) { handlers.current.onZoom(pending > 0 ? 0.5 : -0.5); pending = 0; }
+    };
+    host.current.addEventListener('wheel', wheel, { passive: false });
+    // The whole editor, gutter and blank space included, gets the LaTeX menu.
+    const menu = event => handlers.current.onContextMenu?.(event, view);
+    host.current.addEventListener('contextmenu', menu);
     apiRef.current = {
+      view,
       jumpTo(line) {
         const target = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines)));
         view.dispatch({ selection: EditorSelection.cursor(target.from), effects: EditorView.scrollIntoView(target.from, { y: 'center' }) });
@@ -277,9 +439,257 @@ function SourceEditor({ docKey, content, onChange, onCursor, onSave, onCompile, 
       },
       focus: () => view.focus()
     };
-    return () => { apiRef.current = null; view.destroy(); };
+    const element = host.current;
+    return () => { element.removeEventListener('wheel', wheel); element.removeEventListener('contextmenu', menu); apiRef.current = null; viewRef.current = null; view.destroy(); };
   }, [docKey]);
-  return <div className="fo-editor" data-testid="folio-editor" ref={host} />;
+  useEffect(() => { viewRef.current?.dispatch({ effects: wrapping.current.reconfigure(settings.wrap ? EditorView.lineWrapping : []) }); }, [settings.wrap]);
+  useEffect(() => { viewRef.current?.requestMeasure(); }, [settings.size, settings.font]);
+  return <div className="fo-editor" data-testid="folio-editor" ref={host} style={style} />;
+}
+
+/* ───────────── PDF preview ───────────── */
+
+const PDF_VIEW_KEY = 'folio-pdf-view-v1';
+const PDF_PAD = 16, PDF_GAP = 12, CSS_UNITS = 96 / 72;
+const ZOOM_LEVELS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
+const clampZoom = zoom => Math.max(0.25, Math.min(5, zoom));
+let pdfWorker = null;
+function ensurePdfWorker() {
+  // The PDF.js worker ships inside client.js; a Blob URL runs it on the Harness origin.
+  if (pdfWorker) return;
+  pdfWorker = new Worker(URL.createObjectURL(new Blob([__PDF_WORKER__], { type: 'text/javascript' })), { type: 'module' });
+  pdfjs.GlobalWorkerOptions.workerPort = pdfWorker;
+}
+
+function PdfPage({ pdf, number, size, scale, near, marks }) {
+  const host = useRef(null); const text = useRef(null);
+  const drawn = useRef(0); const layerRef = useRef(null); const scaleRef = useRef(scale); scaleRef.current = scale;
+  // Text positions are relative to the page and font sizes follow --scale-factor, so the text
+  // layer tracks zoom immediately, before the canvas is redrawn.
+  useLayoutEffect(() => { text.current?.style.setProperty('--scale-factor', String(scale)); }, [scale]);
+  // Transparent text over the canvas, so the PDF's text can be selected and copied.
+  useEffect(() => {
+    if (!near || !pdf) return;
+    let cancelled = false, layer = null;
+    (async () => {
+      try {
+        const page = await pdf.getPage(number);
+        if (cancelled) return;
+        text.current.replaceChildren();
+        layer = new pdfjs.TextLayer({ textContentSource: page.streamTextContent(), container: text.current, viewport: page.getViewport({ scale: scaleRef.current }) });
+        await layer.render();
+        if (!cancelled) layerRef.current = { layer, page };
+      } catch (error) { if (!cancelled) console.warn('Folio: PDF text', number, error); }
+    })();
+    return () => { cancelled = true; layer?.cancel(); layerRef.current = null; };
+  }, [pdf, number, near]);
+  useEffect(() => {
+    if (!near || !pdf) return;
+    let cancelled = false, task = null;
+    // Redraw after a zoom settles; meanwhile the previous canvas is stretched to the new size.
+    const timer = setTimeout(async () => {
+      try {
+        const page = await pdf.getPage(number);
+        if (cancelled) return;
+        const base = page.getViewport({ scale: 1 });
+        // Keep each canvas under ~16 megapixels so deep zooms stay within browser limits.
+        const pixel = Math.min(scale * Math.min(window.devicePixelRatio || 1, 2), Math.sqrt(16e6 / (base.width * base.height)));
+        const viewport = page.getViewport({ scale: pixel });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
+        task = page.render({ canvasContext: canvas.getContext('2d', { alpha: false }), viewport });
+        await task.promise;
+        if (cancelled || !host.current) return;
+        host.current.querySelector('canvas')?.remove();
+        host.current.prepend(canvas);
+        drawn.current = scale;
+        layerRef.current?.layer.update({ viewport: layerRef.current.page.getViewport({ scale }) });
+      } catch (error) { if (error?.name !== 'RenderingCancelledException' && !cancelled) console.warn('Folio: PDF page', number, error); }
+    }, drawn.current ? 140 : 0);
+    return () => { cancelled = true; clearTimeout(timer); task?.cancel(); };
+  }, [pdf, number, scale, near]);
+  // Pages far from view give their canvas back.
+  useEffect(() => { if (!near && host.current) { host.current.querySelector('canvas')?.remove(); text.current?.replaceChildren(); drawn.current = 0; } }, [near]);
+  return <div className="fo-pdf-page" data-page={number} ref={host} style={{ width: size.w * scale, height: size.h * scale }}>
+    <div className="textLayer" ref={text} />
+    {marks.map((mark, i) => <span key={`${mark.key}-${i}`} className="fo-pdf-mark" style={mark.width < 2
+      ? { left: 0, width: '100%', top: mark.y * scale, height: Math.max(mark.height, 8) * scale }
+      : { left: mark.x * scale - 3, width: mark.width * scale + 6, top: mark.y * scale - 2, height: Math.max(mark.height, 8) * scale + 4 }} />)}
+  </div>;
+}
+
+// Continuous-scroll PDF viewer: pinch or Ctrl/⌘ + scroll zooms around the pointer, the place is kept
+// across rebuilds, double-click jumps to the source, and right-click is handled by `onMenu`.
+function PdfViewer({ t, url, apiRef, onInverse, onMenu, downloadName }) {
+  const scroller = useRef(null);
+  const [doc, setDoc] = useState({ pdf: null, sizes: [] });
+  const [error, setError] = useState('');
+  const [view, setView] = useState(() => ({ mode: 'width', zoom: 1, ...readStored(PDF_VIEW_KEY, {}) }));
+  const [near, setNear] = useState(() => new Set([1, 2]));
+  const [current, setCurrent] = useState(1);
+  const [pageInput, setPageInput] = useState('');
+  const [marks, setMarks] = useState(null);
+  const [zoomMenu, setZoomMenu] = useState(null);
+  const pending = useRef(null); const docRef = useRef(null); const liveScale = useRef(0);
+  const { width, height } = useElementSize(scroller);
+  useEffect(() => { store(PDF_VIEW_KEY, view); }, [view]);
+
+  const sizes = doc.sizes;
+  const widest = Math.max(1, ...sizes.map(size => size.w)), first = sizes[0] || { w: 612, h: 792 };
+  const fitWidth = Math.max(0.1, (width - PDF_PAD * 2) / widest);
+  const fitPage = Math.max(0.1, Math.min(fitWidth, (height - PDF_PAD * 2) / first.h));
+  const scale = view.mode === 'width' ? fitWidth : view.mode === 'page' ? fitPage : view.zoom * CSS_UNITS;
+  const percent = Math.round(scale / CSS_UNITS * 100);
+  const tops = useMemo(() => { let y = PDF_PAD; return sizes.map(size => { const top = y; y += size.h * scale + PDF_GAP; return top; }); }, [sizes, scale]);
+  const layoutRef = useRef({}); layoutRef.current = { tops, sizes, scale };
+  liveScale.current = liveScale.current || scale;
+
+  // Load each new build; keep showing the previous one until the new one is ready.
+  useEffect(() => {
+    if (!url) return;
+    ensurePdfWorker();
+    let cancelled = false, loaded = false;
+    const task = pdfjs.getDocument({ url, isEvalSupported: false, enableXfa: false });
+    task.promise.then(async pdf => {
+      loaded = true;
+      const list = [];
+      for (let i = 1; i <= pdf.numPages; i += 1) { const viewport = (await pdf.getPage(i)).getViewport({ scale: 1 }); list.push({ w: viewport.width, h: viewport.height }); }
+      if (cancelled) { pdf.destroy(); return; }
+      const element = scroller.current, { tops: oldTops, sizes: oldSizes, scale: oldScale } = layoutRef.current;
+      if (element && docRef.current && oldTops.length) {
+        // Same page, same spot within it, as before the rebuild.
+        let index = 0;
+        while (index + 1 < oldTops.length && oldTops[index + 1] <= element.scrollTop) index += 1;
+        pending.current = { page: index, within: (element.scrollTop - oldTops[index]) / (oldSizes[index].h * oldScale), left: element.scrollLeft };
+      }
+      const previous = docRef.current;
+      docRef.current = pdf;
+      setDoc({ pdf, sizes: list }); setError('');
+      if (previous) setTimeout(() => previous.destroy(), 1500);
+    }).catch(failure => { if (!cancelled) setError(messageOf(failure)); });
+    return () => { cancelled = true; if (!loaded) task.destroy(); };
+  }, [url]);
+  useEffect(() => () => { docRef.current?.destroy(); docRef.current = null; }, []);
+
+  // Apply a pending scroll once the new layout is in place.
+  useLayoutEffect(() => {
+    const element = scroller.current, target = pending.current;
+    liveScale.current = scale;
+    if (!element || !target) return;
+    if (target.zoomFrom) {
+      const ratio = scale / target.zoomFrom;
+      element.scrollLeft = target.contentX * ratio - target.x;
+      element.scrollTop = target.contentY * ratio - target.y;
+    } else if (target.page !== undefined && tops[target.page] !== undefined) {
+      element.scrollTop = tops[target.page] + target.within * sizes[target.page].h * scale;
+      element.scrollLeft = target.left;
+    }
+    pending.current = null;
+  }, [scale, tops]);
+
+  function zoomTo(next, clientX, clientY) {
+    const element = scroller.current;
+    if (element && !pending.current?.zoomFrom) {
+      const rect = element.getBoundingClientRect();
+      const x = (clientX ?? rect.left + rect.width / 2) - rect.left, y = (clientY ?? rect.top + rect.height / 2) - rect.top;
+      pending.current = { zoomFrom: scale, x, y, contentX: element.scrollLeft + x, contentY: element.scrollTop + y };
+    }
+    liveScale.current = next.mode === 'custom' ? next.zoom * CSS_UNITS : liveScale.current;
+    setView(next);
+  }
+  const zoomRef = useRef(zoomTo); zoomRef.current = zoomTo;
+  const step = direction => {
+    const now = liveScale.current / CSS_UNITS;
+    const level = direction > 0 ? ZOOM_LEVELS.find(value => value > now + 0.001) : [...ZOOM_LEVELS].reverse().find(value => value < now - 0.001);
+    zoomTo({ mode: 'custom', zoom: level ?? clampZoom(now) });
+  };
+  useEffect(() => {
+    const element = scroller.current;
+    if (!element) return;
+    // Trackpad pinch arrives as Ctrl + wheel; Safari also sends gesture events.
+    const wheel = event => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      zoomRef.current({ mode: 'custom', zoom: clampZoom(liveScale.current / CSS_UNITS * Math.exp(-event.deltaY * 0.01)) }, event.clientX, event.clientY);
+    };
+    let base = 1;
+    const start = event => { event.preventDefault(); base = liveScale.current / CSS_UNITS; };
+    const change = event => { event.preventDefault(); zoomRef.current({ mode: 'custom', zoom: clampZoom(base * event.scale) }, event.clientX, event.clientY); };
+    element.addEventListener('wheel', wheel, { passive: false });
+    element.addEventListener('gesturestart', start); element.addEventListener('gesturechange', change);
+    return () => { element.removeEventListener('wheel', wheel); element.removeEventListener('gesturestart', start); element.removeEventListener('gesturechange', change); };
+  }, []);
+
+  const track = useCallback(() => {
+    const element = scroller.current;
+    if (!element || !sizes.length) return;
+    const top = element.scrollTop, span = element.clientHeight;
+    const next = new Set(); let page = 1;
+    sizes.forEach((size, i) => {
+      const a = tops[i], b = a + size.h * scale;
+      if (b >= top - span && a <= top + span * 2) next.add(i + 1);
+      if (a <= top + span * 0.4) page = i + 1;
+    });
+    setNear(previous => previous.size === next.size && [...next].every(value => previous.has(value)) ? previous : next);
+    setCurrent(page);
+  }, [sizes, tops, scale]);
+  useEffect(() => { track(); }, [track, height]);
+
+  const goTo = number => { const element = scroller.current; const index = Math.max(1, Math.min(sizes.length, number)) - 1; if (element && tops[index] !== undefined) element.scrollTo({ top: tops[index] - PDF_PAD / 2, behavior: 'smooth' }); };
+  const pointOf = event => {
+    const page = event.target.closest?.('.fo-pdf-page');
+    if (!page) return null;
+    const box = page.getBoundingClientRect();
+    return { page: Number(page.dataset.page), x: (event.clientX - box.left) / scale, y: (event.clientY - box.top) / scale };
+  };
+  apiRef.current = {
+    zoomIn: () => step(1), zoomOut: () => step(-1),
+    fit: mode => setView(previous => ({ ...previous, mode })),
+    actual: () => zoomTo({ mode: 'custom', zoom: 1 }),
+    percent,
+    selection: () => { const selected = window.getSelection(); return selected && scroller.current?.contains(selected.anchorNode) ? selected.toString() : ''; },
+    reveal(boxes) {
+      const element = scroller.current, box = boxes[0];
+      if (!element || !box || tops[box.page - 1] === undefined) return;
+      element.scrollTop = tops[box.page - 1] + box.y * scale - element.clientHeight / 3;
+      element.scrollLeft = Math.max(0, PDF_PAD + box.x * scale - element.clientWidth / 4);
+      const key = Date.now();
+      setMarks({ key, boxes: boxes.slice(0, 8) });
+      setTimeout(() => setMarks(previous => previous?.key === key ? null : previous), 2400);
+    }
+  };
+
+  if (error && !doc.pdf) return <div className="fo-empty"><p className="fo-form-error">{t('pdfFailed')}: {error}</p><a className="fo-btn" href={url} target="_blank" rel="noreferrer"><Icon name="external" size={14} /> {t('openPdfTab')}</a></div>;
+  return <div className="fo-pdf-viewer">
+    <div className="fo-pdf-scroll" ref={scroller} tabIndex={0} onScroll={track}
+      onDoubleClick={event => { const point = pointOf(event); if (point) { window.getSelection()?.removeAllRanges(); onInverse?.(point); } }}
+      onContextMenu={event => onMenu?.(event, pointOf(event))}
+      onKeyDown={event => {
+        if (!(event.ctrlKey || event.metaKey)) return;
+        if (event.key === '=' || event.key === '+') { event.preventDefault(); step(1); }
+        else if (event.key === '-') { event.preventDefault(); step(-1); }
+        else if (event.key === '0') { event.preventDefault(); setView(previous => ({ ...previous, mode: 'width' })); }
+      }}>
+      {!doc.pdf ? <div className="fo-empty"><span className="fo-spinner" /><p>{t('loadingPdf')}</p></div>
+        : <div className="fo-pdf-pages" style={{ padding: PDF_PAD, gap: PDF_GAP }}>{sizes.map((size, i) => <PdfPage key={i} pdf={doc.pdf} number={i + 1} size={size} scale={scale} near={near.has(i + 1)} marks={marks ? marks.boxes.filter(box => box.page === i + 1).map(box => ({ ...box, key: marks.key })) : []} />)}</div>}
+    </div>
+    {doc.pdf && <div className="fo-pdf-bar" onDoubleClick={event => event.stopPropagation()}>
+      <button className="fo-icon-btn" title={t('prevPage')} aria-label={t('prevPage')} disabled={current <= 1} onClick={() => goTo(current - 1)}><Icon name="back" size={14} /></button>
+      <input className="fo-pdf-page-input" aria-label={t('page')} value={pageInput || String(current)} onFocus={event => { setPageInput(String(current)); event.target.select(); }} onChange={event => setPageInput(event.target.value.replace(/\D/g, ''))} onBlur={() => setPageInput('')} onKeyDown={event => { if (event.key === 'Enter') { goTo(Number(pageInput) || current); event.currentTarget.blur(); } }} />
+      <span className="fo-pdf-count">/ {sizes.length}</span>
+      <button className="fo-icon-btn" title={t('nextPage')} aria-label={t('nextPage')} disabled={current >= sizes.length} onClick={() => goTo(current + 1)}><Icon name="right" size={14} /></button>
+      <i className="fo-pdf-sep" />
+      <button className="fo-icon-btn" title={`${t('zoomOut')} (${MOD}−)`} aria-label={t('zoomOut')} onClick={() => step(-1)}><Icon name="minus" size={14} /></button>
+      <button className="fo-pdf-zoom" title={t('zoom')} onClick={event => { const box = event.currentTarget.getBoundingClientRect(); setZoomMenu({ position: 'fixed', left: box.left - 40, top: box.top - 4, flip: 8 }); }}>{view.mode === 'width' ? t('fitWidth') : view.mode === 'page' ? t('fitPage') : `${percent}%`}</button>
+      <button className="fo-icon-btn" title={`${t('zoomIn')} (${MOD}+)`} aria-label={t('zoomIn')} onClick={() => step(1)}><Icon name="plus" size={14} /></button>
+    </div>}
+    {zoomMenu && <Menu anchor={zoomMenu} onClose={() => setZoomMenu(null)} items={[
+      { label: t('fitWidth'), icon: 'fit-width', checked: view.mode === 'width' || undefined, run: () => setView(previous => ({ ...previous, mode: 'width' })) },
+      { label: t('fitPage'), icon: 'fit-page', checked: view.mode === 'page' || undefined, run: () => setView(previous => ({ ...previous, mode: 'page' })) },
+      '-',
+      ...[0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4].map(zoom => ({ label: `${zoom * 100}%`, checked: (view.mode === 'custom' && Math.abs(view.zoom - zoom) < 0.001) || undefined, run: () => zoomTo({ mode: 'custom', zoom }) }))
+    ]} />}
+  </div>;
 }
 
 /* ───────────── diff review ───────────── */
@@ -326,11 +736,40 @@ function PromptForm({ t, label, initial = '', placeholder, submitLabel, onSubmit
     <footer><button type="button" className="fo-btn" onClick={onCancel} disabled={busy}>{t('cancel')}</button><button className={danger ? 'fo-btn is-danger' : 'fo-btn is-primary'} disabled={busy}>{submitLabel}</button></footer>
   </form>;
 }
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const MOD = IS_MAC ? '⌘' : 'Ctrl+';
+// Menu items: { label, run, icon, hint, checked, disabled, danger }, '-' separators, or
+// { row: [{ title, icon | glyph, run }] } for a strip of tool buttons.
 function Menu({ items, onClose, anchor }) {
   const ref = useRef(null);
-  useEffect(() => { const listener = event => { if (!ref.current?.contains(event.target)) onClose(); }; const key = event => { if (event.key === 'Escape') onClose(); }; setTimeout(() => window.addEventListener('pointerdown', listener)); window.addEventListener('keydown', key); return () => { window.removeEventListener('pointerdown', listener); window.removeEventListener('keydown', key); }; }, []);
-  return <div className="fo-menu" ref={ref} role="menu" style={anchor}>{items.filter(Boolean).map(item => <button key={item.label} role="menuitem" className={item.danger ? 'is-danger' : ''} onClick={() => { onClose(); item.run(); }}>{item.label}</button>)}</div>;
+  const [position, setPosition] = useState(anchor);
+  useLayoutEffect(() => {
+    // Keep the menu on screen: shift left from the right edge, open upward near the bottom.
+    const box = ref.current?.getBoundingClientRect();
+    if (!box) return;
+    const left = Math.max(8, Math.min(anchor.left, window.innerWidth - box.width - 8));
+    const top = anchor.top + box.height > window.innerHeight - 8 ? Math.max(8, anchor.top - box.height - (anchor.flip || 0)) : anchor.top;
+    setPosition({ ...anchor, left, top });
+  }, [anchor]);
+  useEffect(() => {
+    const listener = event => { if (!ref.current?.contains(event.target)) onClose(); };
+    const key = event => { if (event.key === 'Escape') onClose(); };
+    const blur = () => onClose();
+    setTimeout(() => window.addEventListener('pointerdown', listener));
+    window.addEventListener('keydown', key); window.addEventListener('blur', blur);
+    return () => { window.removeEventListener('pointerdown', listener); window.removeEventListener('keydown', key); window.removeEventListener('blur', blur); };
+  }, []);
+  const list = items.filter(Boolean).filter((item, i, all) => item !== '-' || (i > 0 && i < all.length - 1 && all[i - 1] !== '-'));
+  const hasMarks = list.some(item => item.icon || item.checked !== undefined);
+  return <div className="fo-menu" ref={ref} role="menu" style={{ ...position, flip: undefined }} onContextMenu={event => { event.preventDefault(); event.stopPropagation(); }}>{list.map((item, i) => item === '-' ? <hr key={i} />
+    : item.row ? <div key={i} className="fo-menu-row" role="group">{item.row.map(tool => <button key={tool.title} role="menuitem" title={tool.hint ? `${tool.title} (${tool.hint})` : tool.title} aria-label={tool.title} onClick={() => { onClose(); tool.run(); }}>{tool.icon ? <Icon name={tool.icon} size={15} /> : <span className={`fo-glyph ${tool.glyphClass || ''}`}>{tool.glyph}</span>}</button>)}</div>
+    : <button key={i} role="menuitem" disabled={item.disabled} className={item.danger ? 'is-danger' : ''} onClick={() => { onClose(); item.run(); }}>
+      {hasMarks && <span className="fo-menu-mark">{item.checked ? <Icon name="check" size={14} /> : item.icon ? <Icon name={item.icon} size={14} /> : null}</span>}
+      <span className="fo-menu-label">{item.label}</span>{item.hint && <kbd>{item.hint}</kbd>}
+    </button>)}</div>;
 }
+// Open a menu at the pointer for a right-click, instead of the browser's own menu.
+function menuAt(event) { event.preventDefault(); event.stopPropagation(); return { position: 'fixed', left: event.clientX, top: event.clientY }; }
 function useToasts() {
   const [toasts, setToasts] = useState([]);
   const push = useCallback((text, tone = 'info') => { const id = Math.random(); setToasts(list => [...list.slice(-2), { id, text, tone }]); setTimeout(() => setToasts(list => list.filter(item => item.id !== id)), tone === 'error' ? 7000 : 3200); }, []);
@@ -420,7 +859,7 @@ function Library({ t, locale, projects, loading, onOpen, onCreate, onRename, onD
   const templates = [['article', t('tplArticle'), t('tplArticleHint')], ['ctex', t('tplCtex'), t('tplCtexHint')], ['blank', t('tplBlank'), t('tplBlankHint')]];
   const [importing, setImporting] = useState(null); const [importError, setImportError] = useState(''); const [dragging, setDragging] = useState(false);
   const [tex, setTex] = useState(null); const [texOpen, setTexOpen] = useState(false);
-  const zipRef = useRef(null); const folderRef = useRef(null);
+  const zipRef = useRef(null); const folderRef = useRef(null); const nameRef = useRef(null);
   const checkTex = useCallback(() => rpc('texStatus', { quick: true }).then(setTex).catch(() => setTex({ engines: [] })), []);
   useEffect(() => { checkTex(); }, [checkTex]);
   async function runImport(source) {
@@ -438,14 +877,14 @@ function Library({ t, locale, projects, loading, onOpen, onCreate, onRename, onD
     else if (file && /\.zip$/i.test(file.name)) runImport({ zip: file });
     else setImportError(t('importDropHint'));
   }
-  return <div className="fo-library"><div className="fo-library-inner">
+  return <div className="fo-library" onContextMenu={event => { if (event.target.closest('input, textarea, select, a[href], .fo-menu, .fo-dialog')) return; setMenu({ project: null, anchor: menuAt(event) }); }}><div className="fo-library-inner">
     <header className="fo-library-head"><div className="fo-wordmark"><FolioMark size={36} /><div><h1>Folio</h1><p className="fo-lead">{t('libraryLead')}</p></div></div>
       <button className={`fo-tex-pill ${tex ? (tex.engines.length ? 'is-ok' : 'is-missing') : ''}`} onClick={() => setTexOpen(true)} title={t('texEnv')}>
         <span className="fo-tex-dot" aria-hidden="true" />{!tex ? t('texChecking') : tex.engines.length ? `TeX · ${tex.engines.map(engine => ENGINE_LABEL[engine]).join(', ')}` : t('texMissing')}
       </button>
     </header>
     <form className="fo-create" onSubmit={async event => { event.preventDefault(); if (!name.trim()) { setError(t('required')); return; } setBusy(true); setError(''); try { await onCreate(name.trim(), template); setName(''); } catch (failure) { setError(messageOf(failure)); } finally { setBusy(false); } }}>
-      <label className="fo-field"><span>{t('newProject')}</span><input data-testid="folio-name-input" value={name} disabled={busy} placeholder={t('projectPlaceholder')} onChange={event => { setName(event.target.value); setError(''); }} /></label>
+      <label className="fo-field"><span>{t('newProject')}</span><input ref={nameRef} data-testid="folio-name-input" value={name} disabled={busy} placeholder={t('projectPlaceholder')} onChange={event => { setName(event.target.value); setError(''); }} /></label>
       <button className="fo-btn is-primary fo-create-submit" disabled={busy}>{busy ? t('creating') : t('create')}</button>
       <fieldset className="fo-templates"><legend>{t('template')}</legend>{templates.map(([id, label, hint]) => <label key={id} className={template === id ? 'is-selected' : ''}><input type="radio" name="template" value={id} checked={template === id} onChange={() => setTemplate(id)} /><strong>{label}</strong><small>{hint}</small></label>)}</fieldset>
       {error && <p className="fo-form-error" role="alert">{error}</p>}
@@ -464,7 +903,7 @@ function Library({ t, locale, projects, loading, onOpen, onCreate, onRename, onD
     <section className="fo-shelf">
       <header><h2>{t('library')}</h2><span className="fo-count">{projects.length}</span></header>
       {!projects.length && !loading ? <p className="fo-shelf-empty">{t('noProjects')}</p> : <div className="fo-pages">{projects.map((project, index) => <article key={project.id} className="fo-page" style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}>
-        <button className="fo-page-open" onClick={() => onOpen(project.id)} aria-label={`${t('open')} ${project.name}`}>
+        <button className="fo-page-open" onClick={() => onOpen(project.id)} onContextMenu={event => setMenu({ project, anchor: menuAt(event) })} aria-label={`${t('open')} ${project.name}`}>
           <span className="fo-page-icon" aria-hidden="true"><Icon name="tex" size={18} /></span>
           <strong>{project.name}</strong>
           <small>{ENGINE_LABEL[project.engine] || 'pdfLaTeX'} · {t('edited')} {relativeTime(project.updatedAt, locale)}</small>
@@ -474,7 +913,8 @@ function Library({ t, locale, projects, loading, onOpen, onCreate, onRename, onD
     </section>
   </div>
     {texOpen && <TexDialog t={t} onClose={() => { setTexOpen(false); checkTex(); }} />}
-    {menu && <Menu anchor={menu.anchor} onClose={() => setMenu(null)} items={[{ label: t('open'), run: () => onOpen(menu.project.id) }, { label: t('rename'), run: () => setDialog({ kind: 'rename', project: menu.project }) }, { label: t('delete'), danger: true, run: () => setDialog({ kind: 'delete', project: menu.project }) }]} />}
+    {menu && <Menu anchor={menu.anchor} onClose={() => setMenu(null)} items={menu.project ? [{ label: t('open'), icon: 'tex', run: () => onOpen(menu.project.id) }, { label: t('rename'), run: () => setDialog({ kind: 'rename', project: menu.project }) }, '-', { label: t('delete'), danger: true, run: () => setDialog({ kind: 'delete', project: menu.project }) }]
+      : [{ label: t('newProjectShort'), icon: 'plus', run: () => nameRef.current?.focus() }, { label: t('importZip'), icon: 'import', run: () => zipRef.current?.click() }, { label: t('importFolder'), icon: 'folder', run: () => folderRef.current?.click() }, '-', { label: t('texEnv'), icon: 'gear', run: () => setTexOpen(true) }]} />}
     {dialog && <Dialog title={dialog.kind === 'rename' ? t('rename') : t('delete')} onClose={() => setDialog(null)}>
       <PromptForm t={t} label={t('projectName')} initial={dialog.project.name} danger={dialog.kind === 'delete'} message={dialog.kind === 'delete' ? `${t('deleteProjectConfirm')} — ${dialog.project.name}` : ''} submitLabel={dialog.kind === 'delete' ? t('delete') : t('save')} onCancel={() => setDialog(null)} onSubmit={async value => { if (dialog.kind === 'delete') await onDelete(dialog.project.id); else await onRename(dialog.project.id, value); setDialog(null); }} />
     </Dialog>}
@@ -501,9 +941,32 @@ function FileTree({ t, files, activePath, mainFile, onOpen, onAction, onUpload }
     });
   }, [files]);
   const hidden = path => { const parts = path.split('/'); return parts.slice(0, -1).some((_, i) => collapsed.has(parts.slice(0, i + 1).join('/'))); };
-  return <div className={`fo-tree ${dragging ? 'is-drop' : ''}`} onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragging(true); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDragging(false); }} onDrop={event => { event.preventDefault(); setDragging(false); if (event.dataTransfer.files.length) onUpload([...event.dataTransfer.files]); }}>
-    <nav aria-label={t('files')}>{rows.map(row => hidden(row.path) ? null : <div key={row.path} className={`fo-tree-row ${row.path === activePath ? 'is-active' : ''}`} style={{ '--depth': row.depth }}>
-      <button className="fo-tree-item" title={row.path} onClick={() => row.directory ? setCollapsed(previous => { const next = new Set(previous); next.has(row.path) ? next.delete(row.path) : next.add(row.path); return next; }) : onOpen(row.path)}>
+  const toggleFolder = path => setCollapsed(previous => { const next = new Set(previous); next.has(path) ? next.delete(path) : next.add(path); return next; });
+  const copyPath = path => navigator.clipboard?.writeText(path).catch(() => {});
+  // Right-click: a file, a folder, or the empty space below the tree.
+  const treeMenu = row => !row ? [
+    { label: t('newFile'), icon: 'plus', run: () => onAction('new', '') },
+    { label: t('uploadFiles'), icon: 'upload', run: () => onAction('upload') },
+    '-',
+    { label: t('collapseAll'), run: () => setCollapsed(new Set(rows.filter(item => item.directory).map(item => item.path))) },
+    { label: t('expandAll'), run: () => setCollapsed(new Set()) }
+  ] : row.directory ? [
+    { label: collapsed.has(row.path) ? t('expand') : t('collapse'), icon: 'folder', run: () => toggleFolder(row.path) },
+    { label: t('newFileHere'), icon: 'plus', run: () => onAction('new', `${row.path}/`) },
+    '-',
+    { label: t('copyPath'), icon: 'copy', run: () => copyPath(row.path) }
+  ] : [
+    { label: t('open'), icon: row.kind === 'image' ? 'image' : 'tex', run: () => onOpen(row.path) },
+    row.path.endsWith('.tex') && row.path !== mainFile && { label: t('setMain'), icon: 'star', run: () => onAction('main', row.path) },
+    '-',
+    { label: t('rename'), run: () => onAction('rename', row.path) },
+    { label: t('copyPath'), icon: 'copy', run: () => copyPath(row.path) },
+    '-',
+    { label: t('delete'), danger: true, run: () => onAction('delete', row.path) }
+  ];
+  return <div className={`fo-tree ${dragging ? 'is-drop' : ''}`} onContextMenu={event => setMenu({ row: null, anchor: menuAt(event) })} onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); setDragging(true); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDragging(false); }} onDrop={event => { event.preventDefault(); setDragging(false); if (event.dataTransfer.files.length) onUpload([...event.dataTransfer.files]); }}>
+    <nav aria-label={t('files')}>{rows.map(row => hidden(row.path) ? null : <div key={row.path} className={`fo-tree-row ${row.path === activePath ? 'is-active' : ''} ${menu?.row?.path === row.path ? 'is-menu' : ''}`} style={{ '--depth': row.depth }} onContextMenu={event => setMenu({ row, anchor: menuAt(event) })}>
+      <button className="fo-tree-item" title={row.path} onClick={() => row.directory ? toggleFolder(row.path) : onOpen(row.path)}>
         {row.directory ? <span className={`fo-tree-caret ${collapsed.has(row.path) ? '' : 'is-open'}`}><Icon name="right" size={12} /></span> : <span className="fo-tree-caret" />}
         <span className={`fo-tree-icon kind-${row.directory ? 'folder' : row.kind}`}><Icon name={row.directory ? 'folder' : row.kind === 'image' ? 'image' : 'tex'} size={14} /></span>
         <span className="fo-tree-name">{row.name}</span>
@@ -512,7 +975,7 @@ function FileTree({ t, files, activePath, mainFile, onOpen, onAction, onUpload }
       {!row.directory && <button className="fo-tree-more" aria-label="…" onClick={event => { const box = event.currentTarget.getBoundingClientRect(); setMenu({ row, anchor: { position: 'fixed', top: box.bottom + 2, left: box.left - 120 } }); }}><Icon name="more" size={14} /></button>}
     </div>)}</nav>
     {dragging && <div className="fo-drop-hint">{t('dropHere')}</div>}
-    {menu && <Menu anchor={menu.anchor} onClose={() => setMenu(null)} items={[menu.row.path.endsWith('.tex') && menu.row.path !== mainFile && { label: t('setMain'), run: () => onAction('main', menu.row.path) }, { label: t('rename'), run: () => onAction('rename', menu.row.path) }, { label: t('delete'), danger: true, run: () => onAction('delete', menu.row.path) }]} />}
+    {menu && <Menu anchor={menu.anchor} onClose={() => setMenu(null)} items={treeMenu(menu.row)} />}
   </div>;
 }
 
@@ -629,6 +1092,10 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   const [compileMenu, setCompileMenu] = useState(false);
   const [drop, setDrop] = useState(null);
   const [texOpen, setTexOpen] = useState(false);
+  const [editorSettings, setEditorSettings] = useState(() => ({ ...EDITOR_DEFAULTS, ...readStored(EDITOR_KEY, {}) }));
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [menu, setMenu] = useState(null);
+  const pdfApi = useRef(null);
   const rootRef = useRef(null); const editorApi = useRef(null); const uploadRef = useRef(null); const mounted = useRef(true);
   const live = useRef({}); live.current = { project, file, dirty, autoCompile, session, cursor };
   const saving = useRef(null); const saveTimer = useRef(0); const generation = useRef(0);
@@ -637,6 +1104,10 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
 
   const updateLayout = patch => setLayout(previous => { const next = typeof patch === 'function' ? patch(previous) : { ...previous, ...patch }; return next; });
   useEffect(() => { store(LAYOUT_KEY, layout); }, [layout]);
+  useEffect(() => { store(EDITOR_KEY, editorSettings); }, [editorSettings]);
+  const updateEditor = patch => setEditorSettings(previous => ({ ...previous, ...patch }));
+  const zoomEditor = delta => setEditorSettings(previous => ({ ...previous, size: delta === 0 ? EDITOR_DEFAULTS.size : clampSize(previous.size + delta) }));
+  const openMenu = (event, items) => setMenu({ anchor: menuAt(event), items });
   useEffect(() => { store(AUTO_KEY, autoCompile); }, [autoCompile]);
 
   const loadFiles = useCallback(async () => { const { files: list } = await rpc('listFiles', { projectId }); setFiles(list); return list; }, [projectId]);
@@ -829,6 +1300,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   }
   async function fileAction(kind, path) {
     if (kind === 'main') { try { setProject(await rpc('updateProject', { projectId, mainFile: path })); } catch (error) { toast(messageOf(error), 'error'); } return; }
+    if (kind === 'upload') { uploadRef.current?.click(); return; }
     setDialog({ kind, path });
   }
   async function submitDialog(value) {
@@ -962,6 +1434,90 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
       ? { ...previous, dock: previous.lastDock && previous.lastDock !== 'float' ? previous.lastDock : 'right' }
       : { ...previous, dock: 'float', lastDock: dock });
   }
+  // SyncTeX: double-click in the PDF opens the source line; "Show in PDF" goes the other way.
+  async function syncToSource({ page, x, y }) {
+    try {
+      const result = await rpc('synctex', { projectId, direction: 'toSource', page, x, y });
+      if (!result.available) { toast(t('syncUnavailable')); return; }
+      if (!result.file || !files.some(item => item.path === result.file)) return;
+      if (narrow) setMobilePane('editor'); else if (!layout.show.editor) updateLayout(previous => ({ ...previous, show: { ...previous.show, editor: true } }));
+      if (live.current.file?.path !== result.file) await openFile(result.file);
+      setTimeout(() => editorApi.current?.jumpTo(result.line), 60);
+    } catch (error) { toast(messageOf(error), 'error'); }
+  }
+  async function syncToPdf() {
+    const current = live.current.file;
+    if (!current || current.kind !== 'text') return;
+    try {
+      const result = await rpc('synctex', { projectId, direction: 'toPdf', file: current.path, line: live.current.cursor.line });
+      if (!result.available) { toast(t('syncUnavailable')); return; }
+      if (!result.boxes?.length) { toast(t('syncNoMatch')); return; }
+      setShowIssues(false);
+      if (narrow) setMobilePane('pdf'); else if (!layout.show.pdf) updateLayout(previous => ({ ...previous, show: { ...previous.show, pdf: true } }));
+      setTimeout(() => pdfApi.current?.reveal(result.boxes), 80);
+    } catch (error) { toast(messageOf(error), 'error'); }
+  }
+  async function clipboard(view, kind) {
+    try {
+      if (kind === 'paste') view.dispatch({ ...view.state.replaceSelection(await navigator.clipboard.readText()), scrollIntoView: true, userEvent: 'input.paste' });
+      else {
+        const { state } = view;
+        await navigator.clipboard.writeText(state.selection.ranges.map(range => state.sliceDoc(range.from, range.to)).join('\n'));
+        if (kind === 'cut') view.dispatch({ ...view.state.replaceSelection(''), userEvent: 'delete.cut' });
+      }
+    } catch { toast(kind === 'paste' ? t('pasteBlocked') : t('clipboardBlocked'), 'error'); }
+    view.focus();
+  }
+  // Right-click menus. Text fields, links and the chat transcript keep the browser's menu.
+  const paneItems = () => [
+    ...(narrow ? [] : [['files', t('files')], ['editor', t('editor')], ['pdf', t('pdf')], ['chat', t('assistant')]].map(([pane, label]) => ({ label, checked: show[pane], run: () => toggle(pane) }))),
+    '-',
+    ...(narrow ? [] : [['right', t('dockRight')], ['left', t('dockLeft')], ['bottom', t('dockBottom')], ['float', t('dockFloat')]].map(([value, label]) => ({ label, checked: show.chat && dock === value, run: () => updateLayout(previous => ({ ...previous, dock: value, show: { ...previous.show, chat: true } })) }))),
+    '-',
+    { label: t('compile'), icon: 'play', hint: `${MOD}↵`, disabled: compiling, run: () => compileRef.current() },
+    { label: t('texEnv'), icon: 'gear', run: () => setTexOpen(true) },
+    { label: t('backToLibrary'), icon: 'back', run: async () => { await save().catch(() => {}); onExit(); } }
+  ];
+  function editorMenu(event, view) {
+    // Right-clicking outside the selection moves the cursor there first, as native editors do.
+    const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
+    const selection = view.state.selection.main;
+    if (position != null && (position < selection.from || position > selection.to)) view.dispatch({ selection: EditorSelection.cursor(position) });
+    const actions = latexActions(t);
+    const bind = id => ({ ...actions[id], run: () => actions[id].run(view) });
+    const selected = !view.state.selection.main.empty;
+    openMenu(event, [
+      { row: ['bold', 'italic', 'underline', 'mono', 'math', 'equation', 'itemize', 'enumerate'].map(bind) },
+      { row: ['section', 'subsection', 'figure', 'table', 'cite', 'ref', 'label', 'comment'].map(bind) },
+      '-',
+      { label: t('cut'), icon: 'cut', hint: `${MOD}X`, disabled: !selected, run: () => clipboard(view, 'cut') },
+      { label: t('copy'), icon: 'copy', hint: `${MOD}C`, disabled: !selected, run: () => clipboard(view, 'copy') },
+      { label: t('paste'), icon: 'paste', hint: `${MOD}V`, run: () => clipboard(view, 'paste') },
+      { label: t('selectAll'), hint: `${MOD}A`, run: () => { view.dispatch({ selection: EditorSelection.range(0, view.state.doc.length) }); view.focus(); } },
+      '-',
+      { label: t('showInPdf'), icon: 'locate', disabled: !build?.hasPdf, run: syncToPdf },
+      { label: t('compile'), icon: 'play', hint: `${MOD}↵`, disabled: compiling, run: () => compileRef.current() },
+      { label: t('editorSettings'), icon: 'gear', run: () => setSettingsOpen(true) }
+    ]);
+  }
+  function pdfMenu(event, point) {
+    const api = pdfApi.current;
+    const selected = api?.selection() || '';
+    openMenu(event, [
+      point && { label: t('showInSource'), icon: 'locate', run: () => syncToSource(point) },
+      selected && { label: t('copyText'), icon: 'copy', run: () => navigator.clipboard.writeText(selected).catch(() => toast(t('clipboardBlocked'), 'error')) },
+      '-',
+      { label: t('zoomIn'), icon: 'zoom-in', hint: `${MOD}+`, run: () => api?.zoomIn() },
+      { label: t('zoomOut'), icon: 'zoom-out', hint: `${MOD}−`, run: () => api?.zoomOut() },
+      { label: t('fitWidth'), icon: 'fit-width', hint: `${MOD}0`, run: () => api?.fit('width') },
+      { label: t('fitPage'), icon: 'fit-page', run: () => api?.fit('page') },
+      { label: t('actualSize'), run: () => api?.actual() },
+      '-',
+      { label: t('compile'), icon: 'play', hint: `${MOD}↵`, disabled: compiling, run: () => compileRef.current() },
+      { label: t('download'), icon: 'download', run: () => { const link = document.createElement('a'); link.href = pdfUrl; link.download = `${project?.name || 'manuscript'}.pdf`; link.click(); } },
+      { label: t('openPdfTab'), icon: 'external', run: () => window.open(pdfUrl, '_blank', 'noopener') }
+    ]);
+  }
   const jump = problem => {
     const go = () => { setShowIssues(false); setTimeout(() => editorApi.current?.jumpTo(problem.line), 30); if (narrow) setMobilePane('editor'); };
     if (problem.file && problem.file !== file?.path && files.some(item => item.path === problem.file)) openFile(problem.file).then(go); else if (problem.line) go();
@@ -974,8 +1530,10 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   const editorPane = visible.editor && (<section key="editor" className="fo-pane fo-pane-editor" style={narrow ? undefined : { flex: visible.pdf ? `${layout.split} 1 0` : '1 1 0' }}>
     <header className="fo-pane-head">
       <div className="fo-crumbs">{file ? file.path.split('/').map((part, i, all) => <span key={i} className={i === all.length - 1 ? 'is-file' : ''}>{part}</span>) : <span className="fo-caps">{t('editor')}</span>}</div>
-      <div className="fo-pane-actions"><span className={`fo-save is-${saveState}`}>{saveState === 'saving' ? t('saving') : saveState === 'dirty' ? t('unsaved') : t('saved')}</span></div>
+      <div className="fo-pane-actions"><span className={`fo-save is-${saveState}`}>{saveState === 'saving' ? t('saving') : saveState === 'dirty' ? t('unsaved') : t('saved')}</span>{!editorSettings.toolbar && <button className="fo-icon-btn" data-editor-settings title={t('editorSettings')} aria-label={t('editorSettings')} onClick={() => setSettingsOpen(!settingsOpen)}><Icon name="gear" size={15} /></button>}</div>
     </header>
+    {editorSettings.toolbar && file?.kind === 'text' && !reviewProposal && <LatexToolbar t={t} apiRef={editorApi} settingsOpen={settingsOpen} onSettings={() => setSettingsOpen(!settingsOpen)} onShowInPdf={syncToPdf} canSync={Boolean(build?.hasPdf)} />}
+    {settingsOpen && <EditorSettings t={t} settings={editorSettings} onChange={updateEditor} onClose={() => setSettingsOpen(false)} />}
     {proposals.length > 0 && !reviewProposal && <button className="fo-proposal-bar" onClick={() => setReviewing(proposals[0].id)}><Icon name="spark" /><span><strong>{proposals.length > 1 ? `${proposals.length} ${t('proposals')}` : t('proposal')}</strong> · {proposals[0].summary || proposals[0].path}</span><em>{t('review')} →</em></button>}
     {conflict && <div className="fo-conflict" role="alert"><Icon name="alert" /><span>{t('diskChanged')}</span><button className="fo-btn is-small" onClick={() => resolveConflict(false).catch(error => toast(messageOf(error), 'error'))}>{t('reload')}</button><button className="fo-btn is-small" onClick={() => resolveConflict(true).catch(error => toast(messageOf(error), 'error'))}>{t('overwrite')}</button></div>}
     <div className="fo-pane-body">
@@ -987,7 +1545,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
       : !file ? <div className="fo-empty"><p>{t('selectFile')}</p></div>
       : file.kind === 'image' ? <div className="fo-image-preview"><img alt={file.path} src={endpoint(`api/folio/raw?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(file.path)}`)} /></div>
       : file.kind !== 'text' ? <div className="fo-empty"><p>{t('binaryFile')}</p></div>
-      : <SourceEditor docKey={file.key} content={file.content} apiRef={editorApi} onChange={onChange} onCursor={setCursor} onSave={saveAndMaybeCompile} onCompile={() => compileRef.current()} />}
+      : <SourceEditor t={t} docKey={file.key} content={file.content} apiRef={editorApi} settings={editorSettings} style={editorStyle(editorSettings)} onZoom={zoomEditor} onContextMenu={editorMenu} onChange={onChange} onCursor={setCursor} onSave={saveAndMaybeCompile} onCompile={() => compileRef.current()} />}
     </div>
     <footer className="fo-status"><span>{file?.kind === 'text' ? 'LaTeX' : ''}</span>{file?.kind === 'text' && <><span>{t('line')} {cursor.line}</span><span>{words.toLocaleString(locale)} {t('words')}</span></>}</footer>
   </section>);
@@ -1001,18 +1559,18 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
       <div className="fo-pane-actions">{showIssues && build && <button className="fo-btn is-small" onClick={() => setShowIssues(false)}>{t('hideIssues')}</button>}{pdfUrl && <a className="fo-icon-btn" href={pdfUrl} download={`${project?.name || 'manuscript'}.pdf`} title={t('download')} aria-label={t('download')}><Icon name="download" /></a>}</div>
     </header>
     <div className="fo-pane-body fo-desk">
-      {showIssues && build ? <div className="fo-issues">
+      {pdfUrl ? <PdfViewer t={t} url={pdfUrl} apiRef={pdfApi} onInverse={syncToSource} onMenu={pdfMenu} />
+        : <div className="fo-empty fo-empty-pdf"><div className="fo-sheet" aria-hidden="true"><span /><span /><span /><span /></div><h3>{t('noPdf')}</h3><p>{t('noPdfHint')}</p><button className="fo-btn is-primary" onClick={() => compileRef.current()} disabled={compiling}><Icon name="play" fill size={13} /> {t('compile')}</button></div>}
+      {showIssues && build && <div className="fo-issues is-over">
         <h3 className="fo-caps">{t('issues')} {errorCount > 0 && <span className="is-error">{errorCount} {t('errors')}</span>} {warningCount > 0 && <span className="is-warning">{warningCount} {t('warnings')}</span>}</h3>
         {problems.length ? <ul>{problems.map((problem, i) => <li key={i} className={`is-${problem.level}`}><button onClick={() => problem.setup ? setTexOpen(true) : jump(problem)} disabled={!problem.line && !problem.setup}><span className="fo-issue-dot" /><span className="fo-issue-text">{problem.message}</span>{problem.line ? <code>{problem.file || file?.path || ''}:{problem.line}</code> : null}</button></li>)}</ul> : <p className="fo-muted">{t('noIssues')}</p>}
         {build.log && <details><summary>{t('rawLog')}</summary><pre>{build.log}</pre></details>}
-      </div>
-      : pdfUrl ? <iframe className="fo-pdf" title={t('pdf')} src={`${pdfUrl}#view=FitH&toolbar=1`} />
-      : <div className="fo-empty fo-empty-pdf"><div className="fo-sheet" aria-hidden="true"><span /><span /><span /><span /></div><h3>{t('noPdf')}</h3><p>{t('noPdfHint')}</p><button className="fo-btn is-primary" onClick={() => compileRef.current()} disabled={compiling}><Icon name="play" fill size={13} /> {t('compile')}</button></div>}
+      </div>}
     </div>
   </section>);
   const chatStyle = narrow ? undefined : chatFills ? { flex: '1 1 0' } : dock === 'bottom' ? { height: layout.chatHeight || 320 } : floating ? { left: float.x, top: float.y, width: float.w, height: float.h } : { width: layout.chat };
   const chatPane = visible.chat && (<section key="chat" className={`fo-pane fo-pane-chat is-${chatFills ? 'main' : dock}${drop ? ' is-dropping' : ''}`} style={chatStyle} aria-label={t('assistant')}>
-    <header className="fo-pane-head" onPointerDown={dragChat} onDoubleClick={toggleFloat} title={narrow || chatFills ? undefined : t('dragHint')}>
+    <header className="fo-pane-head" onContextMenu={event => openMenu(event, [{ label: t('newChat'), icon: 'plus', disabled: !project || running, run: () => project && bindSession(project, { fresh: true }) }, '-', ...paneItems()])} onPointerDown={dragChat} onDoubleClick={toggleFloat} title={narrow || chatFills ? undefined : t('dragHint')}>
       <ChatSwitcher t={t} locale={locale} services={services} directory={project?.directory} currentId={session.id} running={running} onSwitch={id => project && bindSession(project, { target: id })} onNew={() => project && bindSession(project, { fresh: true })} onArchive={archiveChats} archived={archived} />
       <div className="fo-pane-actions">
         <button className="fo-icon-btn" onClick={() => project && bindSession(project, { fresh: true })} disabled={!project || running} title={t('newChat')} aria-label={t('newChat')}><Icon name="plus" /></button>
@@ -1039,7 +1597,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
     visible.chat && chatFills && chatPane
   ].filter(Boolean);
 
-  return <div className="fo-workspace" ref={rootRef}>
+  return <div className="fo-workspace" ref={rootRef} onContextMenu={event => { if (event.target.closest('input, textarea, select, a[href], .fo-chat-body, .fo-menu, .fo-popover, .fo-dialog')) return; openMenu(event, paneItems()); }}>
     <header className="fo-topbar">
       <div className="fo-topbar-left">
         <button className="fo-home" onClick={async () => { await save().catch(() => {}); onExit(); }} title={t('back')} aria-label={t('back')}><FolioMark /><span>Folio</span></button>
@@ -1059,9 +1617,10 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
     <div className={`fo-bench ${narrow ? 'is-narrow' : ''}`}>{bench}</div>
     {floating && chatPane}
     {texOpen && <TexDialog t={t} onClose={() => setTexOpen(false)} />}
+    {menu && <Menu anchor={menu.anchor} items={menu.items} onClose={() => setMenu(null)} />}
     {drop && <div className={`fo-drop is-${drop.zone}`} style={{ left: drop.left, top: drop.top, width: drop.width, height: drop.height }} aria-hidden="true" />}
     {dialog && <Dialog title={{ new: t('newFile'), rename: t('renameFile'), delete: t('deleteFile'), title: t('rename') }[dialog.kind]} onClose={() => setDialog(null)}>
-      <PromptForm t={t} label={dialog.kind === 'title' ? t('projectName') : t('filePath')} placeholder={t('filePlaceholder')} initial={dialog.kind === 'title' ? project?.name : dialog.kind === 'new' ? '' : dialog.path} danger={dialog.kind === 'delete'} message={dialog.kind === 'delete' ? `${t('deleteFileConfirm')} — ${dialog.path}` : ''} submitLabel={dialog.kind === 'delete' ? t('delete') : dialog.kind === 'new' ? t('create') : t('save')} onCancel={() => setDialog(null)} onSubmit={submitDialog} />
+      <PromptForm t={t} label={dialog.kind === 'title' ? t('projectName') : t('filePath')} placeholder={t('filePlaceholder')} initial={dialog.kind === 'title' ? project?.name : dialog.kind === 'new' ? dialog.path || '' : dialog.path} danger={dialog.kind === 'delete'} message={dialog.kind === 'delete' ? `${t('deleteFileConfirm')} — ${dialog.path}` : ''} submitLabel={dialog.kind === 'delete' ? t('delete') : dialog.kind === 'new' ? t('create') : t('save')} onCancel={() => setDialog(null)} onSubmit={submitDialog} />
     </Dialog>}
   </div>;
 }

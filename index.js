@@ -15,7 +15,7 @@ export const RPC_PATH = '/api/folio';
 export const PDF_PATH = '/api/folio/pdf';
 export const RAW_PATH = '/api/folio/raw';
 const CONTEXT_KIND = 'folio-context';
-const USER_ACTIONS = new Set(['listProjects', 'createProject', 'getProject', 'updateProject', 'deleteProject', 'listFiles', 'readFile', 'writeFile', 'deleteFile', 'renameFile', 'uploadFile', 'compile', 'lastBuild', 'listProposals', 'applyProposal', 'rejectProposal', 'focus', 'texStatus', 'setTexBin', 'testTex']);
+const USER_ACTIONS = new Set(['listProjects', 'createProject', 'getProject', 'updateProject', 'deleteProject', 'listFiles', 'readFile', 'writeFile', 'deleteFile', 'renameFile', 'uploadFile', 'compile', 'lastBuild', 'listProposals', 'applyProposal', 'rejectProposal', 'focus', 'texStatus', 'setTexBin', 'testTex', 'synctex']);
 const MODEL_ACTIONS = ['listFiles', 'readFile', 'compile', 'lastBuild', 'propose_patch'];
 const NO_STORE = { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' };
 

@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { compileProject, parseLog, BIBER_CACHE } from './compiler.js';
 
-export const TOOLS = ['pdflatex', 'xelatex', 'lualatex', 'bibtex', 'biber', 'tectonic', 'kpsewhich'];
+export const TOOLS = ['pdflatex', 'xelatex', 'lualatex', 'bibtex', 'biber', 'tectonic', 'kpsewhich', 'synctex'];
 const ENGINE_TOOLS = ['pdflatex', 'xelatex', 'lualatex', 'tectonic'];
 // Packages most papers and templates load; kpsewhich reports the ones the distribution lacks.
 export const PACKAGES = ['amsmath', 'amssymb', 'graphicx', 'hyperref', 'geometry', 'xcolor', 'booktabs', 'tikz', 'natbib', 'biblatex', 'cleveref', 'siunitx', 'listings', 'algorithm2e', 'microtype', 'enumitem', 'subcaption', 'fontspec', 'xeCJK', 'ctex'];

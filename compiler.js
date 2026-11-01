@@ -17,8 +17,8 @@ export function buildCommand(engine, mainFile) {
   if (typeof mainFile !== 'string' || !mainFile.endsWith('.tex') || path.isAbsolute(mainFile) || mainFile.includes('\\') || mainFile.split('/').some(part => !part || part.startsWith('.'))) throw new Error('Invalid main TeX path');
   mainFile = `./${mainFile}`;
   return engine === 'tectonic'
-    ? { command: 'tectonic', args: ['--only-cached', '--untrusted', '--outdir', 'output', mainFile] }
-    : { command: engine, args: ['-no-shell-escape', '-interaction=nonstopmode', '-halt-on-error', '-file-line-error', '-output-directory=output', mainFile] };
+    ? { command: 'tectonic', args: ['--only-cached', '--untrusted', '--synctex', '--outdir', 'output', mainFile] }
+    : { command: engine, args: ['-no-shell-escape', '-interaction=nonstopmode', '-halt-on-error', '-file-line-error', '-synctex=1', '-output-directory=output', mainFile] };
 }
 export async function snapshotSources(root, target) {
   const hash = crypto.createHash('sha256');
@@ -116,7 +116,9 @@ export function compileProject({ root, mainFile = 'main.tex', engine = 'pdflatex
       const pdfPath = path.join(temp, 'output', `${path.basename(mainFile, '.tex')}.pdf`);
       const stat = await fs.lstat(pdfPath);
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_PDF) throw new Error('PDF output size or type limit');
-      return { ok: true, pdf: await fs.readFile(pdfPath), log: result.log, diagnostics: result.diagnostics, version };
+      // SyncTeX maps PDF positions to source lines; it records paths inside this temporary snapshot.
+      const synctex = await fs.readFile(path.join(temp, 'output', `${path.basename(mainFile, '.tex')}.synctex.gz`)).catch(() => null);
+      return { ok: true, pdf: await fs.readFile(pdfPath), synctex, synctexRoot: synctex ? await fs.realpath(temp) : '', log: result.log, diagnostics: result.diagnostics, version };
     } catch (error) { return { ok: false, pdf: null, log: error.message, version }; }
     finally { await fs.rm(temp, { recursive: true, force: true }); }
   });

@@ -28,6 +28,8 @@ Folio 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harne
 - **真实 TeX 编译**：pdfLaTeX、XeLaTeX、LuaLaTeX 或 Tectonic，自动运行 BibTeX/Biber 并重编译；错误整理成列表，点击跳到对应文件和行。
 - **自动找到 TeX**：即使 Harness 的 `PATH` 里没有，Folio 也能找到 MacTeX、TeX Live、TinyTeX 或 MiKTeX；“测试渲染”一键检查各引擎、BibTeX/Biber 和中文（ctex）输出。
 - **导入已有项目**：导入 `.zip`（例如从 Overleaf 下载的）或文件夹，自动识别主文件和编译引擎。
+- **真正的 PDF 预览**：双指捏合或 ⌘/Ctrl + 滚轮以指针为中心缩放，适合宽度/整页，文字可选中复制，重新编译后停留在原来的位置。双击 PDF 跳到对应源码行，“在 PDF 中定位”反向跳转（SyncTeX）。
+- **可调的编辑器**：LaTeX 格式工具栏，字号与字体，七套配色，Folio 各处右键都有带 LaTeX 工具的菜单。
 - **布局随你**：每个面板都能开关、拖动尺寸。按住助手标题栏即可拖出成浮窗，浮窗的任意边和角都能拉伸；拖到左、右或底部边缘松手即重新停靠。
 
 ## 功能
@@ -38,6 +40,22 @@ Folio 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harne
 - **按项目补全参数**：`\ref{` / `\cref{` 补全全项目的 `\label`；`\cite{` 补全 `.bib` 中的条目；`\input{`、`\includegraphics{`、`\usepackage{`、`\documentclass{` 补全文件、宏包和文档类。
 - 停止输入约 1 秒后自动保存；用文件哈希防止覆盖磁盘上的改动。
 - 搜索替换、括号匹配、字数统计（支持中文）。
+- **格式工具栏**：加粗、斜体、下划线、等宽、各级标题、行内/行间公式、列表、插图和表格模板、引用、交叉引用、标签、脚注、注释。作用于选中文字，再点一次即取消。
+- **右键源码**：同样的工具，加上剪切、复制、粘贴、在 PDF 中定位和编辑器设置。
+- **编辑器设置**（工具栏齿轮）：字号、字体、配色（Harness、GitHub、Solarized、Paper、One Dark、Dracula、Nord）、自动换行、是否显示工具栏。在源码上双指缩放或 ⌘/Ctrl + 滚轮也能调字号。
+
+### PDF 预览
+- 基于 PDF.js 连续显示所有页面，高分屏清晰，文字可选中复制。
+- **缩放**：触控板双指捏合或 ⌘/Ctrl + 滚轮（以指针为中心），⌘/Ctrl + `+` / `-`，⌘/Ctrl + `0` 适合宽度，或在缩放菜单选择适合宽度、适合整页、50–400%。
+- 悬浮栏里有页码和翻页按钮；缩放比例会记住，重新编译后仍停在原来的页面和位置。
+- **SyncTeX**：双击 PDF 任意位置，打开对应的源码行（包括 `\input` 引入的文件）；“在 PDF 中定位”（工具栏或右键）滚动到当前行并高亮。
+- 右键：在源码中定位、复制选中文字、缩放选项、编译、下载、在新标签页打开。
+
+### 右键菜单
+除输入框、链接和聊天记录外，Folio 各处的右键都换成了自己的菜单：
+- **文件树**：打开、设为主文件、重命名、复制路径、删除；文件夹上可“在此新建文件”；空白处可新建、上传、全部折叠/展开。
+- **文稿库**：打开、重命名、删除文稿；空白处可新建文稿、导入、打开 TeX 环境。
+- **工作区其他位置**：显示/隐藏面板、调整助手位置、编译、TeX 环境、返回文稿库。
 
 <table>
   <tr>
@@ -137,6 +155,11 @@ npm install --omit=dev
 | `\` | 命令补全 |
 | Tab | 跳到下一个占位符 |
 | ⌘/Ctrl + F | 搜索替换 |
+| ⌘/Ctrl + B / I | 加粗 / 斜体 |
+| ⌘/Ctrl + / | 注释或取消注释 |
+| ⌘/Ctrl + `=` / `-` / `0` | 源码字号（放大、缩小、恢复） |
+| 双指捏合，或 ⌘/Ctrl + 滚轮 | 在 PDF 上缩放 PDF，在源码上调字号 |
+| 双击 PDF | 跳到对应源码行 |
 | 双击助手标题栏 | 在浮窗与停靠之间切换 |
 
 ## 配置
@@ -203,6 +226,7 @@ npm test              # 领域、建议与宿主测试（本机装有 pdfLaTeX/B
 | `compiler.js` | TeX 编译流程与日志解析 |
 | `proposals.js` | 修改建议与 `find/replace` 应用 |
 | `tex.js` | TeX 检测、指定 bin 文件夹、测试渲染 |
+| `synctex.js` | PDF 位置与源码行之间的 SyncTeX 查找 |
 | `import.js` | `.zip` 读取与导入规划（打包进浏览器端） |
 | `client-src.jsx`、`client.css` | 浏览器端界面（打包为 `client.js`） |
 | `locale/` | 中英文文案 |
@@ -214,3 +238,5 @@ npm test              # 领域、建议与宿主测试（本机装有 pdfLaTeX/B
 ## 许可证
 
 [MIT](LICENSE)
+
+浏览器端文件 `client.js` 打包了 [PDF.js](https://github.com/mozilla/pdf.js)（Apache-2.0）、[CodeMirror](https://codemirror.net/)（MIT）和 [jsdiff](https://github.com/kpdecker/jsdiff)（BSD-3-Clause）。

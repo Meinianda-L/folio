@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { compileProject, parseLog, ENGINES } from './compiler.js';
+import { synctexQuery } from './synctex.js';
 
 const MAX_FILE = 2 * 1024 * 1024;
 const MAX_UPLOAD = 10 * 1024 * 1024;
@@ -187,8 +188,13 @@ export class FolioDomain {
       const folder = path.join(root, '.folio');
       await rejectSymlinks(root, folder);
       if (result.pdf) await atomicWrite(path.join(folder, 'output.pdf'), result.pdf);
+      if (result.pdf && result.synctex) await atomicWrite(path.join(folder, 'output.synctex.gz'), result.synctex);
+      else if (result.pdf) await fs.rm(path.join(folder, 'output.synctex.gz'), { force: true });
       const { log: _log, ...stored } = build;
-      await atomicWrite(path.join(folder, 'build.json'), JSON.stringify({ ...stored, hasPdf: Boolean(result.pdf) || Boolean(await this.lastPdf(root)) }));
+      if (result.pdf) stored.synctexRoot = result.synctexRoot || '';
+      const previous = result.pdf ? null : await fs.readFile(path.join(folder, 'build.json'), 'utf8').then(JSON.parse).catch(() => null);
+      // A failed build keeps the last PDF, so it keeps that PDF's SyncTeX root too.
+      await atomicWrite(path.join(folder, 'build.json'), JSON.stringify({ ...stored, synctexRoot: stored.synctexRoot ?? previous?.synctexRoot ?? '', hasPdf: Boolean(result.pdf) || Boolean(await this.lastPdf(root)) }));
       return build;
     }
     if (action === 'lastBuild') {
@@ -196,6 +202,13 @@ export class FolioDomain {
       await rejectSymlinks(root, folder);
       const build = await fs.readFile(path.join(folder, 'build.json'), 'utf8').then(JSON.parse).catch(() => null);
       return { build: build && { ...build, hasPdf: Boolean(await this.lastPdf(root)) } };
+    }
+    if (action === 'synctex') {
+      const folder = path.join(root, '.folio');
+      await rejectSymlinks(root, folder);
+      const build = await fs.readFile(path.join(folder, 'build.json'), 'utf8').then(JSON.parse).catch(() => null);
+      if (args.file !== undefined) validatePath(args.file);
+      return synctexQuery({ folder, synctexRoot: build?.synctexRoot || '', searchPath: await this.tex?.path(), ...args });
     }
     if (action === 'renameFile') {
       const from = await this.filePath(root, args.from);

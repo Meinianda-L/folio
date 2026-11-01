@@ -28,6 +28,8 @@ Folio is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (
 - **Real TeX builds.** pdfLaTeX, XeLaTeX, LuaLaTeX or Tectonic, with BibTeX/Biber and reruns. Errors become a clickable list that jumps to the file and line.
 - **Finds your TeX.** Folio locates MacTeX, TeX Live, TinyTeX or MiKTeX even when Harness's `PATH` doesn't include it, and a **Test rendering** button checks every engine, BibTeX/Biber and Chinese (ctex) output.
 - **Bring existing projects.** Import a `.zip` (e.g. an Overleaf download) or a folder; Folio picks the main file and engine for you.
+- **A real PDF preview.** Pinch or ⌘/Ctrl + scroll to zoom around the pointer, fit width or page, selectable text, and your place kept across rebuilds. Double-click the PDF to jump to the source line, and jump back with **Show in PDF** (SyncTeX).
+- **An editor you can tune.** A LaTeX formatting toolbar, font size and font, seven color themes, and right-click menus with LaTeX tools everywhere in Folio.
 - **Your layout.** Toggle and resize every panel. Drag the assistant by its header to pull it out into a window, resize the window from any edge or corner, and drop it on the left, right or bottom edge to dock it again.
 
 ## Features
@@ -38,6 +40,22 @@ Folio is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (
 - **Project-aware arguments.** `\ref{` / `\cref{` complete every `\label` in the project, `\cite{` completes keys from your `.bib` files, and `\input{`, `\includegraphics{`, `\usepackage{` and `\documentclass{` complete files, packages and classes.
 - Autosave about a second after you stop typing. Hash checks guard against overwriting changes made on disk.
 - Search and replace, bracket matching, and word count (CJK-aware).
+- **Formatting toolbar**: bold, italic, underline, monospace, headings, inline and display math, lists, figure and table templates, citations, cross-references, labels, footnotes and comments. Each wraps the selection, and clicking again unwraps it.
+- **Right-click** in the source for the same tools plus cut, copy, paste, *Show in PDF* and editor settings.
+- **Editor settings** (gear in the toolbar): font size, font, color theme (Harness, GitHub, Solarized, Paper, One Dark, Dracula, Nord), line wrapping, and whether to show the toolbar. Pinch or ⌘/Ctrl + scroll over the source also changes the size.
+
+### PDF preview
+- Continuous pages rendered with PDF.js, sharp on high-DPI screens, with selectable and copyable text.
+- **Zoom**: pinch on a trackpad or ⌘/Ctrl + scroll (zooms around the pointer), ⌘/Ctrl + `+` / `-`, ⌘/Ctrl + `0` for fit width, or the zoom menu (fit width, fit page, 50–400%).
+- Page box and arrows in the floating bar; the zoom level is remembered, and a rebuild keeps you on the same page and spot.
+- **SyncTeX**: double-click anywhere in the PDF to open that line in the source, including files pulled in with `\input`. **Show in PDF** (toolbar or right-click) scrolls to and highlights the current line.
+- Right-click: show in source, copy selected text, zoom options, compile, download, open in a new tab.
+
+### Right-click menus
+Folio replaces the browser's menu everywhere except text fields, links and the chat transcript:
+- **File tree**: open, set as main file, rename, copy path, delete; on folders, new file here; on empty space, new file, upload, collapse or expand all.
+- **Library**: open, rename or delete a manuscript; elsewhere, new manuscript, import and TeX environment.
+- **Anywhere else** in the workspace: show or hide panels, move the assistant, compile, TeX environment, back to library.
 
 <table>
   <tr>
@@ -137,6 +155,11 @@ Then restart Harness. If only `client.js` changed, reloading the page is enough.
 | `\` | Command completion |
 | Tab | Next snippet field |
 | ⌘/Ctrl + F | Search and replace |
+| ⌘/Ctrl + B / I | Bold / italic |
+| ⌘/Ctrl + / | Comment or uncomment |
+| ⌘/Ctrl + `=` / `-` / `0` | Source font size (larger, smaller, reset) |
+| Pinch, or ⌘/Ctrl + scroll | Zoom the PDF (over the PDF) or the source font (over the source) |
+| Double-click the PDF | Jump to that line in the source |
 | Double-click the assistant header | Switch between floating and docked |
 
 ## Configuration
@@ -203,6 +226,7 @@ npm test              # domain, proposals and host tests (real pdfLaTeX/BibTeX w
 | `compiler.js` | TeX pipeline and log parser |
 | `proposals.js` | Suggested edits and `find/replace` application |
 | `tex.js` | TeX detection, chosen bin folder, test renders |
+| `synctex.js` | SyncTeX lookups between PDF positions and source lines |
 | `import.js` | `.zip` reader and import planning (bundled into the client) |
 | `client-src.jsx`, `client.css` | Browser UI (bundled into `client.js`) |
 | `locale/` | English and Chinese strings |
@@ -214,3 +238,5 @@ Multi-user collaboration, share links, public/tunnel access, accounts or a separ
 ## License
 
 [MIT](LICENSE)
+
+The browser bundle (`client.js`) includes [PDF.js](https://github.com/mozilla/pdf.js) (Apache-2.0), [CodeMirror](https://codemirror.net/) (MIT) and [jsdiff](https://github.com/kpdecker/jsdiff) (BSD-3-Clause).

@@ -192,7 +192,7 @@ body[data-ds-dark-theme]:not([data-ds-dark-theme="false"]) .fo-root {
 .fo-tree-row:hover .fo-tree-more, .fo-tree-more:focus-visible { opacity: 1; }
 .fo-tree-more:hover { background: var(--fo-pressed); color: var(--fo-ink); }
 .fo-menu { z-index: 50; min-width: 168px; padding: 4px; border-radius: var(--fo-radius-md); background: var(--fo-raised); box-shadow: var(--fo-shadow); animation: fo-pop .12s ease-out; }
-.fo-menu button { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--fo-radius-sm); background: transparent; text-align: left; font-size: 13px; }
+.fo-menu button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: 0; border-radius: var(--fo-radius-sm); background: transparent; text-align: left; font-size: 13px; color: var(--fo-ink); }
 .fo-menu button:hover { background: var(--fo-hover); }
 .fo-menu button.is-danger { color: var(--fo-error); }
 
@@ -400,3 +400,75 @@ body[data-ds-dark-theme]:not([data-ds-dark-theme="false"]) .fo-root {
 .fo-dialog.fo-tex footer { align-items: center; }
 .fo-spacer { flex: 1; }
 .fo-tex-link { justify-self: start; }
+
+/* Menus */
+.fo-menu { position: fixed; max-height: calc(100vh - 16px); overflow: auto; min-width: 190px; }
+.fo-menu button:disabled { opacity: .4; cursor: default; background: transparent; }
+.fo-menu-mark { width: 16px; flex: none; display: grid; place-items: center; color: var(--fo-muted); }
+.fo-menu-label { flex: 1; white-space: nowrap; }
+.fo-menu kbd { font: inherit; font-size: 11.5px; color: var(--fo-faint); padding-left: 16px; }
+.fo-menu hr { border: 0; height: 1px; margin: 4px 6px; background: var(--fo-line-soft); }
+.fo-menu-row { display: flex; gap: 1px; padding: 1px; }
+.fo-menu .fo-menu-row button { width: 30px; height: 30px; padding: 0; justify-content: center; color: var(--fo-ink); }
+.fo-glyph { font-size: 13px; line-height: 1; font-weight: 500; }
+.fo-glyph.is-bold { font-weight: 800; }
+.fo-glyph.is-italic { font-style: italic; font-family: Georgia, "Times New Roman", serif; font-size: 14px; }
+.fo-glyph.is-underline { text-decoration: underline; text-underline-offset: 2px; }
+.fo-glyph.is-mono { font-family: var(--fo-mono); }
+.fo-glyph.is-math { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 12.5px; }
+.fo-tree-row.is-menu { background: var(--fo-hover); }
+
+/* LaTeX toolbar */
+.fo-texbar { flex: none; display: flex; align-items: center; gap: 2px; padding: 3px 8px; border-bottom: 1px solid var(--fo-line-soft); overflow-x: auto; scrollbar-width: none; }
+.fo-texbar::-webkit-scrollbar { display: none; }
+.fo-texbar-group { display: flex; gap: 1px; padding-right: 5px; margin-right: 3px; border-right: 1px solid var(--fo-line-soft); }
+.fo-texbar-group:last-child { border-right: 0; margin-right: 0; padding-right: 0; }
+.fo-tool { height: 28px; min-width: 28px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center; gap: 1px; flex: none; border: 0; border-radius: var(--fo-radius-sm); background: transparent; color: var(--fo-muted); }
+.fo-tool:hover:not(:disabled), .fo-tool.is-on { background: var(--fo-hover); color: var(--fo-ink); }
+.fo-tool:disabled { opacity: .35; cursor: default; }
+
+/* Editor settings */
+.fo-pane-editor { position: relative; }
+.fo-editor { background: var(--fo-ed-bg, var(--fo-surface)); }
+.fo-ed-settings { top: 78px; right: 10px; width: 300px; z-index: 35; }
+.fo-ed-line { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--fo-muted); }
+.fo-stepper { display: flex; align-items: center; border: 1px solid var(--fo-line); border-radius: var(--fo-radius-sm); overflow: hidden; }
+.fo-stepper button { width: 30px; height: 28px; display: grid; place-items: center; border: 0; background: transparent; color: var(--fo-muted); }
+.fo-stepper button:hover { background: var(--fo-hover); color: var(--fo-ink); }
+.fo-stepper output { min-width: 40px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--fo-ink); }
+.fo-ed-themes > span { display: block; margin-bottom: 8px; font-size: 13px; color: var(--fo-muted); }
+.fo-ed-themes > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.fo-ed-themes button { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--fo-line); border-radius: var(--fo-radius-sm); background: var(--fo-surface); font-size: 12.5px; text-align: left; color: var(--fo-ink); }
+.fo-ed-themes button:hover { background: var(--fo-hover); }
+.fo-ed-themes button.is-selected { border-color: var(--fo-ink); box-shadow: inset 0 0 0 .5px var(--fo-ink); }
+.fo-swatch { width: 30px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center; gap: 2px; border: 1px solid var(--fo-line); border-radius: 4px; }
+.fo-swatch i { width: 5px; height: 5px; border-radius: 50%; }
+
+/* PDF viewer */
+.fo-desk { position: relative; }
+.fo-pdf-viewer { position: absolute; inset: 0; display: flex; }
+.fo-pdf-scroll { flex: 1; min-width: 0; overflow: auto; outline: none; overscroll-behavior: contain; }
+.fo-pdf-scroll > .fo-empty { height: 100%; }
+.fo-pdf-pages { display: flex; flex-direction: column; align-items: center; box-sizing: border-box; width: max-content; min-width: 100%; }
+.fo-pdf-page { position: relative; flex: none; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .14), 0 0 0 1px rgba(0, 0, 0, .04); }
+.fo-pdf-page > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.fo-pdf-mark { position: absolute; z-index: 2; pointer-events: none; border-radius: 3px; background: color-mix(in srgb, var(--fo-accent) 20%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fo-accent) 55%, transparent); animation: fo-mark 2.4s ease-out forwards; }
+@keyframes fo-mark { 0%, 65% { opacity: 1; } 100% { opacity: 0; } }
+.fo-pdf-bar { position: absolute; left: 50%; bottom: 14px; z-index: 3; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 999px; background: var(--fo-raised); box-shadow: var(--fo-shadow); white-space: nowrap; opacity: .6; transition: opacity .2s; }
+.fo-pdf-viewer:hover .fo-pdf-bar, .fo-pdf-bar:focus-within { opacity: 1; }
+.fo-pdf-bar .fo-icon-btn { border-radius: 999px; }
+.fo-pdf-bar .fo-icon-btn:disabled { opacity: .35; }
+.fo-pdf-page-input { width: 36px; height: 26px; border: 1px solid var(--fo-line); border-radius: 6px; background: var(--fo-surface); color: var(--fo-ink); text-align: center; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.fo-pdf-count { padding: 0 4px 0 2px; color: var(--fo-muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.fo-pdf-sep { width: 1px; height: 16px; margin: 0 4px; background: var(--fo-line); }
+.fo-pdf-zoom { min-width: 66px; height: 26px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--fo-ink); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.fo-pdf-zoom:hover { background: var(--fo-hover); }
+.fo-issues.is-over { position: absolute; inset: 0; z-index: 4; }
+/* PDF.js text layer: transparent, selectable text over each page. */
+.textLayer { position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1; text-align: initial; -webkit-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; z-index: 1; }
+.textLayer :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
+.textLayer span.markedContent { top: 0; height: 0; }
+.textLayer ::selection { background: color-mix(in srgb, var(--fo-accent) 32%, transparent); }
+.textLayer br::selection { background: transparent; }
+.textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; }
+.textLayer.selecting .endOfContent { top: 0; }
