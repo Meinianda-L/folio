@@ -28,7 +28,9 @@ export const TEMPLATES = {
   blank: {
     engine: 'pdflatex',
     files: { 'main.tex': '\\documentclass{article}\n\\begin{document}\n\n\\end{document}\n' }
-  }
+  },
+  // Imports start empty; the client uploads the files, then sets the main file and engine.
+  empty: { engine: 'pdflatex', files: {} }
 };
 
 export const contentHash = content => crypto.createHash('sha256').update(content).digest('hex');
@@ -72,6 +74,7 @@ export class FolioDomain {
     if (typeof root !== 'string' || !root) throw fail('A project root is required');
     this.root = path.resolve(root);
     this.tail = Promise.resolve();
+    this.tex = options.tex || null;
   }
   async initialize() { await fs.mkdir(this.root, { recursive: true, mode: 0o700 }); await rejectSymlinks(this.root, this.root); }
   async projectRoot(projectId) {
@@ -179,7 +182,7 @@ export class FolioDomain {
       await this.filePath(root, mainFile);
       if (!ENGINES.includes(engine) || !mainFile.endsWith('.tex')) throw fail('Invalid engine or main TeX file');
       const started = Date.now();
-      const result = await compileProject({ root, mainFile, engine });
+      const result = await compileProject({ root, mainFile, engine, path: await this.tex?.path() });
       const build = { ok: result.ok, log: result.log, problems: parseLog(result.diagnostics ?? result.log), version: result.version, engine, mainFile, durationMs: Date.now() - started, builtAt: new Date().toISOString(), hasPdf: Boolean(result.pdf) };
       const folder = path.join(root, '.folio');
       await rejectSymlinks(root, folder);

@@ -8,13 +8,15 @@ import { snippetCompletion } from '@codemirror/autocomplete';
 import { diffLines } from 'diff';
 import english from './locale/en.json';
 import chinese from './locale/zh.json';
+import { readZip, planImport, toBase64, isSkipped } from './import.js';
 
 const NS = 'folio';
 const PROJECT_KEY = 'folio-project-v1';
 const LAYOUT_KEY = 'folio-layout-v1';
 const AUTO_KEY = 'folio-autocompile-v1';
 const ARCHIVED_KEY = 'folio-archived-chats-v1';
-const ENGINES = [['pdflatex', 'pdfLaTeX'], ['xelatex', 'XeLaTeX'], ['tectonic', 'Tectonic']];
+const ENGINES = [['pdflatex', 'pdfLaTeX'], ['xelatex', 'XeLaTeX'], ['lualatex', 'LuaLaTeX'], ['tectonic', 'Tectonic']];
+const ENGINE_LABEL = Object.fromEntries(ENGINES);
 const TOPBAR = 48;
 const FLOAT_MIN = { w: 280, h: 200 };
 const FLOAT_EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
@@ -101,7 +103,9 @@ const ICONS = {
   'dock-right': 'M4 5h16v14H4zM14 5v14',
   'dock-left': 'M4 5h16v14H4zM10 5v14',
   'dock-bottom': 'M4 5h16v14H4zM4 14h16',
-  'dock-float': 'M4 5h16v14H4zM11 11h7v6h-7z'
+  'dock-float': 'M4 5h16v14H4zM11 11h7v6h-7z',
+  import: 'M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M4.5 14v4A1.5 1.5 0 0 0 6 19.5h12a1.5 1.5 0 0 0 1.5-1.5v-4',
+  gear: 'M12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2.1-1.2L14 3.2h-4l-.5 2.4a7 7 0 0 0-2.1 1.2l-2.3-.9-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2.1 1.2l.5 2.4h4l.5-2.4a7 7 0 0 0 2.1-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z'
 };
 function Icon({ name, size = 16, fill = false }) {
   return <svg className="fo-icon" width={size} height={size} viewBox="0 0 24 24" fill={fill ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={ICONS[name]} /></svg>;
@@ -308,10 +312,10 @@ function DiffView({ proposal }) {
 
 /* ───────────── chrome pieces ───────────── */
 
-function Dialog({ title, children, onClose, busy }) {
+function Dialog({ title, children, onClose, busy, className = '' }) {
   useEffect(() => { const listener = event => { if (event.key === 'Escape' && !busy) onClose(); }; window.addEventListener('keydown', listener); return () => window.removeEventListener('keydown', listener); }, [busy, onClose]);
   return <div className="fo-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !busy) onClose(); }}>
-    <section className="fo-dialog" role="dialog" aria-modal="true" aria-label={title}><h2>{title}</h2>{children}</section>
+    <section className={`fo-dialog ${className}`} role="dialog" aria-modal="true" aria-label={title}><h2>{title}</h2>{children}</section>
   </div>;
 }
 function PromptForm({ t, label, initial = '', placeholder, submitLabel, onSubmit, onCancel, danger, message }) {
@@ -336,30 +340,140 @@ function useToasts() {
 
 /* ───────────── library ───────────── */
 
-function Library({ t, locale, projects, loading, onOpen, onCreate, onRename, onDelete }) {
+/* ───────────── import ───────────── */
+
+// Files from a folder picker or drop as {path, data}; skipped paths carry no data and are never read.
+async function readFiles(list) {
+  return Promise.all(list.map(async ({ path, file }) => ({ path, data: isSkipped(path) ? null : new Uint8Array(await file.arrayBuffer()) })));
+}
+async function walkEntry(entry, prefix = '') {
+  if (entry.isFile) return [{ path: prefix + entry.name, file: await new Promise((resolve, reject) => entry.file(resolve, reject)) }];
+  if (isSkipped(prefix + entry.name)) return [{ path: `${prefix}${entry.name}/`, file: null }];
+  const reader = entry.createReader(), children = [];
+  for (;;) { const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject)); if (!batch.length) break; children.push(...batch); }
+  return (await Promise.all(children.map(child => walkEntry(child, `${prefix}${entry.name}/`)))).flat();
+}
+// What a drop or picker holds: one .zip, or a folder. Resolves to {name, entries}.
+async function importSource({ zip, folder, entry }) {
+  if (zip) return { name: zip.name.replace(/\.zip$/i, ''), entries: await readZip(await zip.arrayBuffer()) };
+  if (entry) return { name: entry.name, entries: await readFiles(await walkEntry(entry)) };
+  const list = [...folder].map(file => ({ path: file.webkitRelativePath || file.name, file }));
+  return { name: list[0]?.path.split('/')[0] || 'Imported', entries: await readFiles(list) };
+}
+
+/* ───────────── TeX environment ───────────── */
+
+const TEX_TOOLS = [['pdflatex', 'pdfLaTeX'], ['xelatex', 'XeLaTeX'], ['lualatex', 'LuaLaTeX'], ['bibtex', 'BibTeX'], ['biber', 'Biber'], ['tectonic', 'Tectonic'], ['kpsewhich', 'kpsewhich']];
+const TEX_TESTS = { pdflatex: 'pdfLaTeX', bibtex: 'pdfLaTeX + BibTeX', biber: 'biblatex + Biber', xelatex: 'XeLaTeX + fontspec', ctex: 'XeLaTeX + ctex 中文', lualatex: 'LuaLaTeX', tectonic: 'Tectonic' };
+const TEX_INSTALL = {
+  darwin: [['MacTeX', 'https://www.tug.org/mactex/', 'brew install --cask mactex-no-gui'], ['TinyTeX', 'https://yihui.org/tinytex/', '']],
+  linux: [['TeX Live', 'https://www.tug.org/texlive/', 'sudo apt install texlive-latex-extra texlive-xetex texlive-luatex texlive-lang-chinese biber']],
+  win32: [['MiKTeX', 'https://miktex.org/download', ''], ['TeX Live', 'https://www.tug.org/texlive/windows.html', '']]
+};
+function TexDialog({ t, onClose }) {
+  const [status, setStatus] = useState(null); const [bin, setBin] = useState(''); const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false); const [testing, setTesting] = useState(false); const [results, setResults] = useState(null);
+  const load = useCallback(() => { setError(''); return rpc('texStatus').then(value => { setStatus(value); setBin(value.texBin || ''); }).catch(failure => setError(messageOf(failure))); }, []);
+  useEffect(() => { load(); }, [load]);
+  async function saveBin(value) {
+    setSaving(true); setError('');
+    try { const next = await rpc('setTexBin', { bin: value }); setStatus(next); setBin(next.texBin || ''); setResults(null); }
+    catch (failure) { setError(messageOf(failure)); } finally { setSaving(false); }
+  }
+  async function runTest() {
+    setTesting(true); setResults(null); setError('');
+    try { setResults((await rpc('testTex')).results); } catch (failure) { setError(messageOf(failure)); } finally { setTesting(false); }
+  }
+  const none = status && !status.engines.length;
+  return <Dialog title={t('texEnv')} onClose={onClose} busy={testing} className="fo-tex">
+    <p className="fo-dialog-copy">{t('texEnvLead')}</p>
+    {!status ? <p className="fo-muted fo-tex-wait">{error ? <span className="fo-form-error">{error}</span> : <><span className="fo-spinner" /> {t('texChecking')}</>}</p> : <>
+      <ul className="fo-tex-tools">{TEX_TOOLS.map(([tool, label]) => { const item = status.tools[tool]; return <li key={tool} className={item ? 'is-ok' : 'is-missing'}>
+        <span className="fo-tex-dot" aria-hidden="true" /><strong>{label}</strong><span className="fo-tex-detail" title={item?.path || ''}>{item ? item.version || item.path : t('texNotFound')}</span>
+      </li>; })}</ul>
+      {status.missingPackages && <p className="fo-tex-note">{status.missingPackages.length ? <>{t('texMissingPackages')} <code>{status.missingPackages.join(', ')}</code></> : t('texPackagesOk')}</p>}
+      {none && <div className="fo-tex-install"><strong>{t('texInstall')}</strong>{(TEX_INSTALL[status.platform] || TEX_INSTALL.linux).map(([name, url, command]) => <p key={name}><a href={url} target="_blank" rel="noreferrer">{name}</a>{command && <code>{command}</code>}</p>)}<p className="fo-muted">{t('texInstallAfter')}</p></div>}
+      <form className="fo-tex-bin" onSubmit={event => { event.preventDefault(); saveBin(bin); }}>
+        <label className="fo-field"><span>{t('texFolder')}</span><input value={bin} disabled={saving} placeholder={t('texFolderAuto')} spellCheck={false} onChange={event => { setBin(event.target.value); setError(''); }} /></label>
+        <button className="fo-btn" disabled={saving || bin.trim() === (status.texBin || '')}>{t('save')}</button>
+        {status.texBin && <button type="button" className="fo-btn" disabled={saving} onClick={() => saveBin('')}>{t('texAuto')}</button>}
+      </form>
+      <p className="fo-tex-note fo-muted">{t('texFolderHint')}</p>
+      {(testing || results) && <ul className="fo-tex-results">{testing ? <li className="is-running"><span className="fo-spinner" /> {t('texTesting')}</li> : results.length ? results.map(item => <li key={item.id} className={item.ok ? 'is-ok' : 'is-failed'}>
+        <Icon name={item.ok ? 'check' : 'alert'} size={14} /><strong>{TEX_TESTS[item.id] || item.id}</strong><small>{(item.durationMs / 1000).toFixed(1)}s</small>
+        {!item.ok && item.error && <pre>{item.error}</pre>}
+      </li>) : <li className="is-failed"><Icon name="alert" size={14} /> {t('texNothingToTest')}</li>}</ul>}
+      {error && <p className="fo-form-error" role="alert">{error}</p>}
+    </>}
+    <footer>
+      <button className="fo-btn" onClick={() => { setStatus(null); setResults(null); load(); }} disabled={testing || saving}><Icon name="refresh" size={14} /> {t('texRedetect')}</button>
+      <span className="fo-spacer" />
+      <button className="fo-btn" onClick={onClose} disabled={testing}>{t('close')}</button>
+      <button className="fo-btn is-primary" onClick={runTest} disabled={!status || none || testing || saving}>{testing ? <span className="fo-spinner" /> : <Icon name="play" fill size={12} />} {t('texTest')}</button>
+    </footer>
+  </Dialog>;
+}
+
+function Library({ t, locale, projects, loading, onOpen, onCreate, onRename, onDelete, onImport }) {
   const [name, setName] = useState(''); const [template, setTemplate] = useState(locale.startsWith('zh') ? 'ctex' : 'article');
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [dialog, setDialog] = useState(null); const [menu, setMenu] = useState(null);
   const templates = [['article', t('tplArticle'), t('tplArticleHint')], ['ctex', t('tplCtex'), t('tplCtexHint')], ['blank', t('tplBlank'), t('tplBlankHint')]];
+  const [importing, setImporting] = useState(null); const [importError, setImportError] = useState(''); const [dragging, setDragging] = useState(false);
+  const [tex, setTex] = useState(null); const [texOpen, setTexOpen] = useState(false);
+  const zipRef = useRef(null); const folderRef = useRef(null);
+  const checkTex = useCallback(() => rpc('texStatus', { quick: true }).then(setTex).catch(() => setTex({ engines: [] })), []);
+  useEffect(() => { checkTex(); }, [checkTex]);
+  async function runImport(source) {
+    if (importing) return;
+    setImporting({ done: 0, total: 0 }); setImportError('');
+    try { const { name, entries } = await importSource(source); await onImport(name, entries, (done, total) => setImporting({ name, done, total })); }
+    catch (failure) { setImportError(messageOf(failure)); } finally { setImporting(null); }
+  }
+  function drop(event) {
+    event.preventDefault(); setDragging(false);
+    const item = [...event.dataTransfer.items].find(entry => entry.kind === 'file');
+    const entry = item?.webkitGetAsEntry?.();
+    const file = item?.getAsFile();
+    if (entry?.isDirectory) runImport({ entry });
+    else if (file && /\.zip$/i.test(file.name)) runImport({ zip: file });
+    else setImportError(t('importDropHint'));
+  }
   return <div className="fo-library"><div className="fo-library-inner">
-    <header className="fo-library-head"><div className="fo-wordmark"><FolioMark size={36} /><div><h1>Folio</h1><p className="fo-lead">{t('libraryLead')}</p></div></div></header>
+    <header className="fo-library-head"><div className="fo-wordmark"><FolioMark size={36} /><div><h1>Folio</h1><p className="fo-lead">{t('libraryLead')}</p></div></div>
+      <button className={`fo-tex-pill ${tex ? (tex.engines.length ? 'is-ok' : 'is-missing') : ''}`} onClick={() => setTexOpen(true)} title={t('texEnv')}>
+        <span className="fo-tex-dot" aria-hidden="true" />{!tex ? t('texChecking') : tex.engines.length ? `TeX · ${tex.engines.map(engine => ENGINE_LABEL[engine]).join(', ')}` : t('texMissing')}
+      </button>
+    </header>
     <form className="fo-create" onSubmit={async event => { event.preventDefault(); if (!name.trim()) { setError(t('required')); return; } setBusy(true); setError(''); try { await onCreate(name.trim(), template); setName(''); } catch (failure) { setError(messageOf(failure)); } finally { setBusy(false); } }}>
       <label className="fo-field"><span>{t('newProject')}</span><input data-testid="folio-name-input" value={name} disabled={busy} placeholder={t('projectPlaceholder')} onChange={event => { setName(event.target.value); setError(''); }} /></label>
       <button className="fo-btn is-primary fo-create-submit" disabled={busy}>{busy ? t('creating') : t('create')}</button>
       <fieldset className="fo-templates"><legend>{t('template')}</legend>{templates.map(([id, label, hint]) => <label key={id} className={template === id ? 'is-selected' : ''}><input type="radio" name="template" value={id} checked={template === id} onChange={() => setTemplate(id)} /><strong>{label}</strong><small>{hint}</small></label>)}</fieldset>
       {error && <p className="fo-form-error" role="alert">{error}</p>}
     </form>
+    <section className={`fo-import ${dragging ? 'is-drop' : ''}`} onDragOver={event => { if ([...event.dataTransfer.types].includes('Files')) { event.preventDefault(); setDragging(true); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget)) setDragging(false); }} onDrop={drop}>
+      <Icon name="import" size={18} />
+      <div className="fo-import-copy"><strong>{importing ? (importing.total ? `${t('importing')} ${importing.done}/${importing.total}` : t('importReading')) : t('importTitle')}</strong><small>{t('importHint')}</small></div>
+      <div className="fo-import-actions">
+        <button className="fo-btn" disabled={Boolean(importing)} onClick={() => zipRef.current?.click()}>{t('importZip')}</button>
+        <button className="fo-btn" disabled={Boolean(importing)} onClick={() => folderRef.current?.click()}>{t('importFolder')}</button>
+      </div>
+      <input ref={zipRef} type="file" accept=".zip,application/zip" hidden onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) runImport({ zip: file }); }} />
+      <input ref={folderRef} type="file" webkitdirectory="" directory="" multiple hidden onChange={event => { const files = [...(event.target.files || [])]; event.target.value = ''; if (files.length) runImport({ folder: files }); }} />
+      {importError && <p className="fo-form-error" role="alert">{importError}</p>}
+    </section>
     <section className="fo-shelf">
       <header><h2>{t('library')}</h2><span className="fo-count">{projects.length}</span></header>
       {!projects.length && !loading ? <p className="fo-shelf-empty">{t('noProjects')}</p> : <div className="fo-pages">{projects.map((project, index) => <article key={project.id} className="fo-page" style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}>
         <button className="fo-page-open" onClick={() => onOpen(project.id)} aria-label={`${t('open')} ${project.name}`}>
           <span className="fo-page-icon" aria-hidden="true"><Icon name="tex" size={18} /></span>
           <strong>{project.name}</strong>
-          <small>{project.engine === 'xelatex' ? 'XeLaTeX' : project.engine === 'tectonic' ? 'Tectonic' : 'pdfLaTeX'} · {t('edited')} {relativeTime(project.updatedAt, locale)}</small>
+          <small>{ENGINE_LABEL[project.engine] || 'pdfLaTeX'} · {t('edited')} {relativeTime(project.updatedAt, locale)}</small>
         </button>
         <button className="fo-page-more" aria-label="…" onClick={event => { const box = event.currentTarget.getBoundingClientRect(); setMenu({ project, anchor: { position: 'fixed', top: box.bottom + 4, left: Math.max(8, box.right - 160) } }); }}><Icon name="more" /></button>
       </article>)}</div>}
     </section>
   </div>
+    {texOpen && <TexDialog t={t} onClose={() => { setTexOpen(false); checkTex(); }} />}
     {menu && <Menu anchor={menu.anchor} onClose={() => setMenu(null)} items={[{ label: t('open'), run: () => onOpen(menu.project.id) }, { label: t('rename'), run: () => setDialog({ kind: 'rename', project: menu.project }) }, { label: t('delete'), danger: true, run: () => setDialog({ kind: 'delete', project: menu.project }) }]} />}
     {dialog && <Dialog title={dialog.kind === 'rename' ? t('rename') : t('delete')} onClose={() => setDialog(null)}>
       <PromptForm t={t} label={t('projectName')} initial={dialog.project.name} danger={dialog.kind === 'delete'} message={dialog.kind === 'delete' ? `${t('deleteProjectConfirm')} — ${dialog.project.name}` : ''} submitLabel={dialog.kind === 'delete' ? t('delete') : t('save')} onCancel={() => setDialog(null)} onSubmit={async value => { if (dialog.kind === 'delete') await onDelete(dialog.project.id); else await onRename(dialog.project.id, value); setDialog(null); }} />
@@ -514,6 +628,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   const [dialog, setDialog] = useState(null);
   const [compileMenu, setCompileMenu] = useState(false);
   const [drop, setDrop] = useState(null);
+  const [texOpen, setTexOpen] = useState(false);
   const rootRef = useRef(null); const editorApi = useRef(null); const uploadRef = useRef(null); const mounted = useRef(true);
   const live = useRef({}); live.current = { project, file, dirty, autoCompile, session, cursor };
   const saving = useRef(null); const saveTimer = useRef(0); const generation = useRef(0);
@@ -888,7 +1003,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
     <div className="fo-pane-body fo-desk">
       {showIssues && build ? <div className="fo-issues">
         <h3 className="fo-caps">{t('issues')} {errorCount > 0 && <span className="is-error">{errorCount} {t('errors')}</span>} {warningCount > 0 && <span className="is-warning">{warningCount} {t('warnings')}</span>}</h3>
-        {problems.length ? <ul>{problems.map((problem, i) => <li key={i} className={`is-${problem.level}`}><button onClick={() => jump(problem)} disabled={!problem.line}><span className="fo-issue-dot" /><span className="fo-issue-text">{problem.message}</span>{problem.line ? <code>{problem.file || file?.path || ''}:{problem.line}</code> : null}</button></li>)}</ul> : <p className="fo-muted">{t('noIssues')}</p>}
+        {problems.length ? <ul>{problems.map((problem, i) => <li key={i} className={`is-${problem.level}`}><button onClick={() => problem.setup ? setTexOpen(true) : jump(problem)} disabled={!problem.line && !problem.setup}><span className="fo-issue-dot" /><span className="fo-issue-text">{problem.message}</span>{problem.line ? <code>{problem.file || file?.path || ''}:{problem.line}</code> : null}</button></li>)}</ul> : <p className="fo-muted">{t('noIssues')}</p>}
         {build.log && <details><summary>{t('rawLog')}</summary><pre>{build.log}</pre></details>}
       </div>
       : pdfUrl ? <iframe className="fo-pdf" title={t('pdf')} src={`${pdfUrl}#view=FitH&toolbar=1`} />
@@ -937,12 +1052,13 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
         <div className="fo-compile">
           <button className="fo-btn is-primary fo-compile-main" onClick={() => compileRef.current()} disabled={compiling || !project} title="⌘/Ctrl + Enter">{compiling ? <span className="fo-spinner" /> : <Icon name="play" fill size={13} />}{compiling ? t('compiling') : t('compile')}</button>
           <button className="fo-btn is-primary fo-compile-more" aria-label={t('engine')} aria-expanded={compileMenu} onClick={() => setCompileMenu(!compileMenu)}><Icon name="chevron" size={14} /></button>
-          {compileMenu && <CompileMenu t={t} project={project} texFiles={texFiles} autoCompile={autoCompile} setAutoCompile={setAutoCompile} setEngine={setEngine} setMain={setMain} onClose={() => setCompileMenu(false)} />}
+          {compileMenu && <CompileMenu t={t} project={project} texFiles={texFiles} autoCompile={autoCompile} setAutoCompile={setAutoCompile} setEngine={setEngine} setMain={setMain} onTex={() => { setCompileMenu(false); setTexOpen(true); }} onClose={() => setCompileMenu(false)} />}
         </div>
       </div>
     </header>
     <div className={`fo-bench ${narrow ? 'is-narrow' : ''}`}>{bench}</div>
     {floating && chatPane}
+    {texOpen && <TexDialog t={t} onClose={() => setTexOpen(false)} />}
     {drop && <div className={`fo-drop is-${drop.zone}`} style={{ left: drop.left, top: drop.top, width: drop.width, height: drop.height }} aria-hidden="true" />}
     {dialog && <Dialog title={{ new: t('newFile'), rename: t('renameFile'), delete: t('deleteFile'), title: t('rename') }[dialog.kind]} onClose={() => setDialog(null)}>
       <PromptForm t={t} label={dialog.kind === 'title' ? t('projectName') : t('filePath')} placeholder={t('filePlaceholder')} initial={dialog.kind === 'title' ? project?.name : dialog.kind === 'new' ? '' : dialog.path} danger={dialog.kind === 'delete'} message={dialog.kind === 'delete' ? `${t('deleteFileConfirm')} — ${dialog.path}` : ''} submitLabel={dialog.kind === 'delete' ? t('delete') : dialog.kind === 'new' ? t('create') : t('save')} onCancel={() => setDialog(null)} onSubmit={submitDialog} />
@@ -950,13 +1066,14 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   </div>;
 }
 
-function CompileMenu({ t, project, texFiles, autoCompile, setAutoCompile, setEngine, setMain, onClose }) {
+function CompileMenu({ t, project, texFiles, autoCompile, setAutoCompile, setEngine, setMain, onTex, onClose }) {
   const ref = useRef(null);
   useEffect(() => { const listener = event => { if (!ref.current?.contains(event.target) && !event.target.closest?.('.fo-compile-more')) onClose(); }; window.addEventListener('pointerdown', listener); return () => window.removeEventListener('pointerdown', listener); }, []);
   return <div className="fo-popover" ref={ref}>
     <label className="fo-field"><span>{t('engine')}</span><select value={project?.engine || 'pdflatex'} onChange={event => setEngine(event.target.value)}>{ENGINES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
     <label className="fo-field"><span>{t('mainFile')}</span><select value={project?.mainFile || 'main.tex'} onChange={event => setMain(event.target.value)}>{texFiles.map(item => <option key={item.path} value={item.path}>{item.path}</option>)}</select></label>
     <label className="fo-switch"><input type="checkbox" checked={autoCompile} onChange={event => setAutoCompile(event.target.checked)} /><span />{t('autoCompile')}</label>
+    <button className="fo-btn is-small fo-tex-link" onClick={onTex}><Icon name="gear" size={14} /> {t('texEnv')}…</button>
   </div>;
 }
 
@@ -976,7 +1093,17 @@ function FolioApp({ services, t, renderSlot, SessionProvider }) {
       : <Library t={t} locale={locale} projects={projects} loading={loading} onOpen={open}
         onCreate={async (name, template) => { const project = await rpc('createProject', { name, template }); await loadProjects(); open(project.id); }}
         onRename={async (id, name) => { await rpc('updateProject', { projectId: id, name }); await loadProjects(); }}
-        onDelete={async id => { await rpc('deleteProject', { projectId: id }); await loadProjects(); }} />}
+        onDelete={async id => { await rpc('deleteProject', { projectId: id }); await loadProjects(); }}
+        onImport={async (name, entries, progress) => {
+          const plan = planImport(entries);
+          const project = await rpc('createProject', { name, template: 'empty' });
+          try {
+            for (const [index, file] of plan.files.entries()) { progress(index, plan.files.length); await rpc('uploadFile', { projectId: project.id, path: file.path, base64: toBase64(file.data), overwrite: true }); }
+            if (plan.mainFile) await rpc('updateProject', { projectId: project.id, mainFile: plan.mainFile, engine: plan.engine });
+          } catch (error) { await rpc('deleteProject', { projectId: project.id }).catch(() => {}); throw error; }
+          toast(`${t('imported')} ${plan.files.length} ${t('importedFiles')} · ${plan.mainFile || t('importNoMain')} · ${ENGINE_LABEL[plan.engine]}${plan.skipped.length ? ` · ${plan.skipped.length} ${t('importSkipped')}` : ''}`);
+          await loadProjects(); open(project.id);
+        }} />}
     {toasts}
   </div>;
 }

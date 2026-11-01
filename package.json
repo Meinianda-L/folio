@@ -19,6 +19,7 @@
     "domain.js",
     "compiler.js",
     "proposals.js",
+    "tex.js",
     "client.js",
     "cordis.patch.yml",
     "locale/*.json",

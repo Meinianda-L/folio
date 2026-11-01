@@ -5,6 +5,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { FolioDomain, fail } from './domain.js';
 import { ProposalStore } from './proposals.js';
+import { TexEnvironment } from './tex.js';
 
 export const name = 'folio';
 export const inject = ['tools', 'connection'];
@@ -14,7 +15,7 @@ export const RPC_PATH = '/api/folio';
 export const PDF_PATH = '/api/folio/pdf';
 export const RAW_PATH = '/api/folio/raw';
 const CONTEXT_KIND = 'folio-context';
-const USER_ACTIONS = new Set(['listProjects', 'createProject', 'getProject', 'updateProject', 'deleteProject', 'listFiles', 'readFile', 'writeFile', 'deleteFile', 'renameFile', 'uploadFile', 'compile', 'lastBuild', 'listProposals', 'applyProposal', 'rejectProposal', 'focus']);
+const USER_ACTIONS = new Set(['listProjects', 'createProject', 'getProject', 'updateProject', 'deleteProject', 'listFiles', 'readFile', 'writeFile', 'deleteFile', 'renameFile', 'uploadFile', 'compile', 'lastBuild', 'listProposals', 'applyProposal', 'rejectProposal', 'focus', 'texStatus', 'setTexBin', 'testTex']);
 const MODEL_ACTIONS = ['listFiles', 'readFile', 'compile', 'lastBuild', 'propose_patch'];
 const NO_STORE = { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' };
 
@@ -39,7 +40,8 @@ export function contextText({ project, files, focus, build, pending }) {
 
 export function apply(ctx, config) {
   const root = config.projectRoot || path.join(os.homedir(), 'Documents', 'DSH-Folio');
-  const domain = new FolioDomain({ root });
+  const tex = new TexEnvironment({ settingsFile: path.join(root, '.folio-settings.json') });
+  const domain = new FolioDomain({ root, tex });
   const proposals = new ProposalStore(domain);
   const sessionProjects = new Map();
   const focusBySession = new Map();
@@ -66,6 +68,9 @@ export function apply(ctx, config) {
 
   async function userAction(action, args) {
     if (!USER_ACTIONS.has(action)) throw fail('Unknown Folio operation');
+    if (action === 'texStatus') return tex.status({ quick: args.quick === true });
+    if (action === 'setTexBin') return tex.setBin(args.bin);
+    if (action === 'testTex') return tex.test();
     if (action === 'listProposals') return { proposals: await proposals.pending(args.projectId) };
     if (action === 'applyProposal' || action === 'rejectProposal') return proposals.settle(args.projectId, args.id, action === 'applyProposal');
     if (action === 'focus') {
@@ -161,7 +166,7 @@ export function apply(ctx, config) {
       edits: { type: 'array', description: 'propose_patch: exact replacements applied in order; each find must occur exactly once', items: { type: 'object', additionalProperties: false, properties: { find: { type: 'string', required: true }, replace: { type: 'string', required: true } } } },
       content: { type: 'string', description: 'propose_patch: full new file content (use for new files or rewrites)' },
       summary: { type: 'string', description: 'propose_patch: one-line description of the change shown to the user' },
-      mainFile: { type: 'string' }, engine: { type: 'string', enum: ['pdflatex', 'xelatex', 'tectonic'] }
+      mainFile: { type: 'string' }, engine: { type: 'string', enum: ['pdflatex', 'xelatex', 'lualatex', 'tectonic'] }
     },
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     async execute({ action, ...args }, exec) {

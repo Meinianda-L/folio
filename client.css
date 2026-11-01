@@ -353,3 +353,50 @@ body[data-ds-dark-theme]:not([data-ds-dark-theme="false"]) .fo-root {
 .fo-live-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--fo-accent); animation: fo-pulse 1s ease-in-out infinite; }
 .fo-chat-none { margin: 6px 4px; font-size: 13px; }
 .fo-chat-list footer { padding-top: 6px; border-top: 1px solid var(--fo-line-soft); }
+
+/* Import */
+.fo-import { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; padding: 14px 16px 14px 18px; border: 1px dashed var(--fo-line-strong); border-radius: var(--fo-radius-lg); color: var(--fo-muted); transition: border-color .15s, background .15s; }
+.fo-import.is-drop { border-color: var(--fo-accent); background: color-mix(in srgb, var(--fo-accent) 6%, transparent); color: var(--fo-accent); }
+.fo-import-copy { flex: 1 1 260px; min-width: 0; display: grid; gap: 2px; }
+.fo-import-copy strong { color: var(--fo-ink); font-weight: 500; font-size: 14px; font-variant-numeric: tabular-nums; }
+.fo-import-copy small { color: var(--fo-faint); font-size: 12.5px; }
+.fo-import-actions { display: flex; gap: 8px; }
+.fo-import .fo-form-error { flex-basis: 100%; }
+
+/* TeX environment */
+.fo-tex-pill { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border: 1px solid var(--fo-line); border-radius: 999px; background: var(--fo-surface); color: var(--fo-muted); font-size: 12.5px; white-space: nowrap; transition: background .15s; }
+.fo-tex-pill:hover { background: var(--fo-hover); color: var(--fo-ink); }
+.fo-tex-pill.is-missing { border-color: color-mix(in srgb, var(--fo-error) 40%, transparent); color: var(--fo-error); }
+.fo-tex-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--fo-faint); }
+.is-ok > .fo-tex-dot { background: var(--fo-ok); }
+.is-missing > .fo-tex-dot { background: var(--fo-error); }
+.fo-dialog.fo-tex { width: min(600px, 100%); max-height: calc(100% - 32px); overflow: auto; display: grid; gap: 14px; }
+.fo-dialog.fo-tex h2 { margin: 0; }
+.fo-tex-wait { display: flex; align-items: center; gap: 8px; margin: 0; }
+.fo-tex-tools { list-style: none; margin: 0; padding: 4px 0; border: 1px solid var(--fo-line); border-radius: var(--fo-radius-md); }
+.fo-tex-tools li { display: grid; grid-template-columns: auto 92px minmax(0, 1fr); align-items: center; gap: 10px; padding: 6px 12px; font-size: 13px; }
+.fo-tex-tools strong { font-weight: 500; }
+.fo-tex-detail { color: var(--fo-muted); font-family: var(--fo-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fo-tex-tools .is-missing .fo-tex-detail { color: var(--fo-faint); font-family: inherit; }
+.fo-tex-note { margin: 0; font-size: 12.5px; }
+.fo-tex-note code, .fo-tex-install code { font-family: var(--fo-mono); font-size: 12px; }
+.fo-tex-install { display: grid; gap: 6px; padding: 12px 14px; border-radius: var(--fo-radius-md); background: var(--fo-hover); font-size: 13px; }
+.fo-tex-install p { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.fo-tex-install a { color: var(--fo-accent); }
+.fo-tex-install code { padding: 1px 6px; border-radius: 4px; background: var(--fo-surface); user-select: all; }
+.fo-tex-bin { display: grid !important; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 8px !important; }
+.fo-tex-bin .fo-btn { height: 38px; }
+.fo-tex-bin input { font-family: var(--fo-mono); font-size: 12.5px; }
+.fo-tex-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.fo-tex-results li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--fo-radius-sm); font-size: 13px; }
+.fo-tex-results li.is-running { display: flex; color: var(--fo-muted); }
+.fo-tex-results .is-ok { color: var(--fo-ink); }
+.fo-tex-results .is-ok > .fo-icon { color: var(--fo-ok); }
+.fo-tex-results .is-failed { background: color-mix(in srgb, var(--fo-error) 7%, transparent); }
+.fo-tex-results .is-failed > .fo-icon { color: var(--fo-error); }
+.fo-tex-results strong { font-weight: 500; }
+.fo-tex-results small { color: var(--fo-faint); font-variant-numeric: tabular-nums; }
+.fo-tex-results pre { grid-column: 1 / -1; margin: 2px 0 0; max-height: 120px; overflow: auto; white-space: pre-wrap; font-family: var(--fo-mono); font-size: 11.5px; color: var(--fo-error); }
+.fo-dialog.fo-tex footer { align-items: center; }
+.fo-spacer { flex: 1; }
+.fo-tex-link { justify-self: start; }

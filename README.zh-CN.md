@@ -25,7 +25,9 @@ Folio 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harne
 - **原生 Harness 对话**：助手就是 Harness 自己的对话组件。模型选择、Markdown、思考过程、工具调用、停止与排队，和主聊天界面完全一致。
 - **修改由你审阅**：助手能读取文件、编译 PDF，但只能*提出*修改。每条建议以差异视图打开，由你应用或舍弃。
 - **上下文无需复制粘贴**：每一轮对话都会悄悄告诉模型当前文稿、文件、光标行、选中文本和最近的编译错误。
-- **真实 TeX 编译**：pdfLaTeX、XeLaTeX 或 Tectonic，自动运行 BibTeX/Biber 并重编译；错误整理成列表，点击跳到对应文件和行。
+- **真实 TeX 编译**：pdfLaTeX、XeLaTeX、LuaLaTeX 或 Tectonic，自动运行 BibTeX/Biber 并重编译；错误整理成列表，点击跳到对应文件和行。
+- **自动找到 TeX**：即使 Harness 的 `PATH` 里没有，Folio 也能找到 MacTeX、TeX Live、TinyTeX 或 MiKTeX；“测试渲染”一键检查各引擎、BibTeX/Biber 和中文（ctex）输出。
+- **导入已有项目**：导入 `.zip`（例如从 Overleaf 下载的）或文件夹，自动识别主文件和编译引擎。
 - **布局随你**：每个面板都能开关、拖动尺寸。按住助手标题栏即可拖出成浮窗，浮窗的任意边和角都能拉伸；拖到左、右或底部边缘松手即重新停靠。
 
 ## 功能
@@ -49,10 +51,22 @@ Folio 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harne
 </table>
 
 ### 编译
-- 引擎：pdfLaTeX、XeLaTeX、Tectonic；在“编译”菜单中选择主文件和引擎。
+- 引擎：pdfLaTeX、XeLaTeX、LuaLaTeX、Tectonic；在“编译”菜单中选择主文件和引擎。
 - **⌘/Ctrl + S** 保存并编译，**⌘/Ctrl + Enter** 编译；可开启“保存时自动编译”。
 - 上一次成功的 PDF 保存在磁盘上，打开文稿即可看到；编译失败也不会丢。
 - 编译问题（错误、警告、排版溢出、参考文献提示）整理成列表，点击即跳到对应行。
+
+### TeX 环境
+在文稿库右上角的 TeX 状态标签，或“编译”菜单里打开 **TeX 环境**。
+- 列出找到的每个工具（pdfLaTeX、XeLaTeX、LuaLaTeX、BibTeX、Biber、Tectonic、kpsewhich）及其版本和路径，并提示缺少哪些常用宏包。
+- 查找顺序：你指定的文件夹、Harness 的 `PATH`、常见安装位置（`/Library/TeX/texbin`、`/usr/local/texlive/*/bin/*`、TinyTeX、Homebrew，以及 Windows 上的 TeX Live / MiKTeX）。
+- **测试渲染**：用每个已安装的引擎编译小文档（pdfLaTeX、BibTeX、biblatex + Biber、XeLaTeX + fontspec、XeLaTeX + ctex 中文、LuaLaTeX、Tectonic），并显示出错信息。
+- 没找到 TeX 时会给出对应平台的安装命令；因缺少引擎而编译失败时，点错误即可打开这里。
+
+### 导入
+- 在文稿库点 **导入 .zip** 或 **导入文件夹**，也可以直接拖到导入区域。
+- 自动去掉外层的单个文件夹；跳过隐藏文件、`.git`、`__MACOSX` 和编译产物（`.aux`、`.log`、`.synctex.gz` 等）。
+- 主文件取含 `\documentclass` 的文件（优先 `main.tex`）；引擎按 `% !TEX program =` 注释判断，否则用到 fontspec/ctex/xeCJK 选 XeLaTeX，用到 luacode/luatexja 选 LuaLaTeX，其余用 pdfLaTeX。
 
 ### 助手
 - 每份文稿对应一个以标题命名的 Harness **工作区**，每次对话都是其中的一个 Harness 会话，在 Harness 侧栏同样可见。
@@ -86,6 +100,7 @@ Folio 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harne
   - macOS：[MacTeX](https://www.tug.org/mactex/) / TeX Live（`pdflatex`、`xelatex`、`bibtex`、`biber`）。
   - Linux：`texlive-latex-base texlive-latex-recommended texlive-latex-extra texlive-xetex`；中文再加 `texlive-lang-chinese` 和中文字体。
   - Tectonic 可选，以 `--only-cached --untrusted` 运行（见“配置”）。
+  - Harness 的 `PATH` 里没有 TeX？Folio 通常也能自动找到；找不到时在 **TeX 环境** 里填写它的 bin 文件夹。
 
 ## 安装
 
@@ -171,7 +186,7 @@ Harness 网页端                              Harness 宿主（Node）
 
 ### 编译隔离
 
-编译全局串行（最多 4 个排队），在项目的临时快照中进行，60 秒超时，禁用 shell escape，使用最小化环境变量，绝不传入模型密钥。限制：每个项目 500 个文件、40 MiB（每次编译源文件 20 MiB），单个文本文件 2 MiB，单次上传 10 MiB。原生 TeX **不是**操作系统级沙箱，Folio 面向你自己的可信项目。
+编译全局串行（最多 4 个排队），在项目的临时快照中进行，60 秒超时，禁用 shell escape，使用最小化环境变量，绝不传入模型密钥。文件读取限制在项目内（`openin_any=p`）；LuaLaTeX 的字体加载器需要按绝对路径读取 TeX Live 自带文件，因此改用 `openin_any=r`，仍然禁止读取隐藏文件。限制：每个项目 500 个文件、40 MiB（每次编译源文件 20 MiB），单个文本文件 2 MiB，单次上传 10 MiB。原生 TeX **不是**操作系统级沙箱，Folio 面向你自己的可信项目。
 
 ## 开发
 
@@ -187,6 +202,8 @@ npm test              # 领域、建议与宿主测试（本机装有 pdfLaTeX/B
 | `domain.js` | 项目、文件、上传、模板、编译记录 |
 | `compiler.js` | TeX 编译流程与日志解析 |
 | `proposals.js` | 修改建议与 `find/replace` 应用 |
+| `tex.js` | TeX 检测、指定 bin 文件夹、测试渲染 |
+| `import.js` | `.zip` 读取与导入规划（打包进浏览器端） |
 | `client-src.jsx`、`client.css` | 浏览器端界面（打包为 `client.js`） |
 | `locale/` | 中英文文案 |
 

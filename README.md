@@ -25,7 +25,9 @@ Folio is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (
 - **Native Harness chat.** The assistant *is* the Harness conversation: model picker, Markdown, reasoning, tool calls and stop/queue all work exactly as in the main chat.
 - **Edits you review.** The assistant reads your files and builds the PDF, but it can only *propose* changes. Each proposal opens as a diff that you apply or discard.
 - **Context without copy-paste.** Each turn quietly tells the model which manuscript, file, cursor line and selection you are on, plus the latest build errors.
-- **Real TeX builds.** pdfLaTeX, XeLaTeX or Tectonic, with BibTeX/Biber and reruns. Errors become a clickable list that jumps to the file and line.
+- **Real TeX builds.** pdfLaTeX, XeLaTeX, LuaLaTeX or Tectonic, with BibTeX/Biber and reruns. Errors become a clickable list that jumps to the file and line.
+- **Finds your TeX.** Folio locates MacTeX, TeX Live, TinyTeX or MiKTeX even when Harness's `PATH` doesn't include it, and a **Test rendering** button checks every engine, BibTeX/Biber and Chinese (ctex) output.
+- **Bring existing projects.** Import a `.zip` (e.g. an Overleaf download) or a folder; Folio picks the main file and engine for you.
 - **Your layout.** Toggle and resize every panel. Drag the assistant by its header to pull it out into a window, resize the window from any edge or corner, and drop it on the left, right or bottom edge to dock it again.
 
 ## Features
@@ -49,10 +51,22 @@ Folio is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (
 </table>
 
 ### Builds
-- Engines: pdfLaTeX, XeLaTeX and Tectonic; choose the main file and engine from the Compile menu.
+- Engines: pdfLaTeX, XeLaTeX, LuaLaTeX and Tectonic; choose the main file and engine from the Compile menu.
 - **⌘/Ctrl + S** saves and compiles; **⌘/Ctrl + Enter** compiles. Optionally compile on every save.
 - The last good PDF is kept on disk and shown as soon as you open a manuscript, even after a failed build.
 - Build issues (errors, warnings, bad boxes, bibliography messages) appear as a list; click one to jump to its line.
+
+### TeX environment
+Open **TeX environment** from the library (the TeX status pill) or the Compile menu.
+- Shows each tool Folio found (pdfLaTeX, XeLaTeX, LuaLaTeX, BibTeX, Biber, Tectonic, kpsewhich), its version and path, and which common packages are missing.
+- Searches the folder you choose, then Harness's `PATH`, then the usual locations: `/Library/TeX/texbin`, `/usr/local/texlive/*/bin/*`, TinyTeX, Homebrew, and TeX Live/MiKTeX on Windows.
+- **Test rendering** compiles small documents with every installed engine (pdfLaTeX, BibTeX, biblatex + Biber, XeLaTeX + fontspec, XeLaTeX + ctex Chinese, LuaLaTeX, Tectonic) and shows any error.
+- If no TeX is found, it shows install commands for your platform. A build that fails because an engine is missing links straight to this dialog.
+
+### Import
+- **Import .zip** or **Import folder** in the library, or drop either onto the import area.
+- A single wrapping folder is removed; hidden files, `.git`, `__MACOSX` and build products (`.aux`, `.log`, `.synctex.gz`, …) are skipped.
+- The main file is the one with `\documentclass` (preferring `main.tex`). The engine comes from a `% !TEX program =` line, or XeLaTeX for fontspec/ctex/xeCJK and LuaLaTeX for luacode/luatexja, otherwise pdfLaTeX.
 
 ### Assistant
 - Each manuscript is a Harness **Workspace** named after its title; every conversation is a Harness Session inside it, so it also shows up in the Harness sidebar.
@@ -86,6 +100,7 @@ Folio is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (
   - macOS: [MacTeX](https://www.tug.org/mactex/) / TeX Live (`pdflatex`, `xelatex`, `bibtex`, `biber`).
   - Linux: `texlive-latex-base texlive-latex-recommended texlive-latex-extra texlive-xetex`; for Chinese add `texlive-lang-chinese` and CJK fonts.
   - Tectonic is optional; it runs with `--only-cached --untrusted` (see Configuration).
+  - Not on Harness's `PATH`? Folio usually finds it anyway; otherwise set its bin folder in **TeX environment**.
 
 ## Installation
 
@@ -171,7 +186,7 @@ Deleting a manuscript moves its folder to `<projectRoot>/.trash/` instead of era
 
 ### Build sandboxing
 
-Builds run one at a time (at most 4 queued) in a temporary snapshot of the project, with a 60-second limit, no shell escape, and a minimal environment that never includes your model keys. Limits: 500 files and 40 MiB per project (20 MiB of sources per build), 2 MiB per text file, 10 MiB per upload. Native TeX is **not** an operating-system sandbox: Folio is meant for your own, trusted projects.
+Builds run one at a time (at most 4 queued) in a temporary snapshot of the project, with a 60-second limit, no shell escape, and a minimal environment that never includes your model keys. File reads are restricted to the project (`openin_any=p`); LuaLaTeX gets `openin_any=r`, which still refuses hidden files, because its font loader reads TeX Live support files by absolute path. Limits: 500 files and 40 MiB per project (20 MiB of sources per build), 2 MiB per text file, 10 MiB per upload. Native TeX is **not** an operating-system sandbox: Folio is meant for your own, trusted projects.
 
 ## Development
 
@@ -187,6 +202,8 @@ npm test              # domain, proposals and host tests (real pdfLaTeX/BibTeX w
 | `domain.js` | Projects, files, uploads, templates, build records |
 | `compiler.js` | TeX pipeline and log parser |
 | `proposals.js` | Suggested edits and `find/replace` application |
+| `tex.js` | TeX detection, chosen bin folder, test renders |
+| `import.js` | `.zip` reader and import planning (bundled into the client) |
 | `client-src.jsx`, `client.css` | Browser UI (bundled into `client.js`) |
 | `locale/` | English and Chinese strings |
 

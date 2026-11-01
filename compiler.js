@@ -4,10 +4,12 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 
-export const ENGINES = ['pdflatex', 'xelatex', 'tectonic'];
+export const ENGINES = ['pdflatex', 'xelatex', 'lualatex', 'tectonic'];
 const MAX_SOURCE = 20 * 1024 * 1024;
 const MAX_PDF = 20 * 1024 * 1024;
 const MAX_LOG = 64 * 1024;
+// Biber unpacks itself on first run; a persistent folder keeps later runs at ~3 s instead of ~25 s.
+export const BIBER_CACHE = path.join(os.tmpdir(), 'dsh-folio-biber');
 let tail = Promise.resolve();
 let waiting = 0;
 export function buildCommand(engine, mainFile) {
@@ -43,13 +45,15 @@ export async function snapshotSources(root, target) {
   await walk();
   return hash.digest('hex');
 }
-function run(command, args, cwd, timeoutMs) {
+function run(command, args, cwd, timeoutMs, searchPath) {
   return new Promise(resolve => {
     let log = '';
     let timeout = false;
     let settled = false;
     // Do not pass provider keys, shell configuration, or the full host environment to TeX.
-    const env = { PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', HOME: cwd, TMPDIR: cwd, openin_any: 'p', openout_any: 'p', shell_escape: 'f', TEXMFOUTPUT: path.join(cwd, 'output'), BIBINPUTS: `${cwd}${path.delimiter}${path.join(cwd, 'output')}${path.delimiter}`, BSTINPUTS: `${cwd}${path.delimiter}`, XDG_CACHE_HOME: process.env.DSH_FOLIO_TEX_CACHE || process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache') };
+    // LuaTeX's font loader reads support files by absolute path, which paranoid mode refuses;
+    // restricted mode still refuses dotfiles.
+    const env = { PATH: searchPath || process.env.PATH || '/usr/local/bin:/usr/bin:/bin', HOME: cwd, TMPDIR: cwd, PAR_GLOBAL_TMPDIR: BIBER_CACHE, openin_any: command === 'lualatex' ? 'r' : 'p', openout_any: 'p', shell_escape: 'f', TEXMFOUTPUT: path.join(cwd, 'output'), BIBINPUTS: `${cwd}${path.delimiter}${path.join(cwd, 'output')}${path.delimiter}`, BSTINPUTS: `${cwd}${path.delimiter}`, XDG_CACHE_HOME: process.env.DSH_FOLIO_TEX_CACHE || process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache') };
     const child = spawn(command, args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     const append = value => { if (log.length < MAX_LOG) log += value.toString().slice(0, MAX_LOG - log.length); };
     child.stdout.on('data', append);
@@ -63,7 +67,8 @@ function run(command, args, cwd, timeoutMs) {
     child.on('close', code => finish(code === 0 && !timeout, timeout ? '\nCompilation timed out' : ''));
   });
 }
-export function compileProject({ root, mainFile = 'main.tex', engine = 'pdflatex', timeoutMs = 60_000 }) {
+// `path` is the PATH to find TeX on, from the TeX environment; it defaults to Harness's own.
+export function compileProject({ root, mainFile = 'main.tex', engine = 'pdflatex', timeoutMs = 60_000, path: searchPath }) {
   if (waiting >= 4) return Promise.resolve({ ok: false, pdf: null, log: 'Compile queue is full', version: '' });
   waiting += 1;
   const operation = tail.then(async () => {
@@ -71,6 +76,7 @@ export function compileProject({ root, mainFile = 'main.tex', engine = 'pdflatex
     let version = '';
     try {
       await fs.chmod(temp, 0o700);
+      await fs.mkdir(BIBER_CACHE, { recursive: true, mode: 0o700 });
       version = await snapshotSources(root, temp);
       await fs.mkdir(path.join(temp, 'output'), { recursive: true });
       const { command, args } = buildCommand(engine, mainFile);
@@ -82,7 +88,7 @@ export function compileProject({ root, mainFile = 'main.tex', engine = 'pdflatex
       async function pass(executable, parameters) {
         const remaining = deadline - Date.now();
         if (remaining <= 0) return { ok: false, log: `${log}\nCompilation timed out`, diagnostics: 'Compilation timed out' };
-        const result = await run(executable, parameters, temp, remaining);
+        const result = await run(executable, parameters, temp, remaining, searchPath);
         log = `${log}${result.log}\n`.slice(0, MAX_LOG);
         if (executable === 'bibtex' || executable === 'biber') bibliographyLog = result.log;
         return { ok: result.ok, log, diagnostics: `${bibliographyLog}\n${result.log}` };
@@ -127,6 +133,8 @@ export function parseLog(log = '') {
   for (let i = 0; i < lines.length; i += 1) {
     const error = lines[i].match(/^(?:\.\/)?([^:\s][^:]*\.(?:tex|sty|cls|bib|bbl)):(\d+): (.+)$/);
     if (error) { push({ level: 'error', file: error[1], line: Number(error[2]), message: error[3].trim() }); continue; }
+    const missing = lines[i].match(/^TeX engine not installed: (.+)$/);
+    if (missing) { push({ level: 'error', file: '', line: 0, message: `${missing[1]} was not found. Open TeX environment to locate your TeX installation.`, setup: true }); continue; }
     if (/^! /.test(lines[i])) { push({ level: 'error', file: '', line: 0, message: lines[i].slice(2).trim() }); continue; }
     const warning = lines[i].match(/^(?:LaTeX|Package [\w-]+) Warning: (.+)$/);
     if (warning) {
