@@ -318,9 +318,19 @@ body[data-ds-dark-theme]:not([data-ds-dark-theme="false"]) .fo-root {
 .fo-handle.is-y span { inset: -1px 0; }
 .fo-root.is-resizing:has(.fo-handle.is-y:active) { cursor: row-resize; }
 .fo-pane-chat.is-float { position: absolute; z-index: 40; border-radius: var(--fo-radius-lg); overflow: hidden; box-shadow: var(--fo-shadow), 0 24px 60px rgba(15, 17, 21, .14); animation: fo-pop .16s ease-out; }
-.fo-pane-chat.is-float > .fo-pane-head { cursor: grab; user-select: none; }
-.fo-pane-chat.is-float > .fo-pane-head:active { cursor: grabbing; }
-.fo-float-grip { position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; z-index: 2; background: linear-gradient(135deg, transparent 50%, var(--fo-line-strong) 50%, var(--fo-line-strong) 58%, transparent 58%, transparent 70%, var(--fo-line-strong) 70%, var(--fo-line-strong) 78%, transparent 78%); }
+.fo-pane-chat:not(.is-main) > .fo-pane-head { cursor: grab; user-select: none; }
+.fo-bench.is-narrow .fo-pane-chat > .fo-pane-head { cursor: auto; user-select: auto; }
+.fo-pane-chat.is-dropping { opacity: .75; transition: opacity .12s; }
+.fo-float-edge { position: absolute; z-index: 3; touch-action: none; }
+.fo-float-edge.is-n, .fo-float-edge.is-s { left: 14px; right: 14px; height: 8px; cursor: ns-resize; }
+.fo-float-edge.is-e, .fo-float-edge.is-w { top: 14px; bottom: 14px; width: 8px; cursor: ew-resize; }
+.fo-float-edge.is-n { top: 0; } .fo-float-edge.is-s { bottom: 0; }
+.fo-float-edge.is-e { right: 0; } .fo-float-edge.is-w { left: 0; }
+.fo-float-edge.is-ne, .fo-float-edge.is-nw, .fo-float-edge.is-se, .fo-float-edge.is-sw { width: 16px; height: 16px; }
+.fo-float-edge.is-ne { top: 0; right: 0; cursor: nesw-resize; } .fo-float-edge.is-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.fo-float-edge.is-nw { top: 0; left: 0; cursor: nwse-resize; }
+.fo-float-edge.is-se { right: 0; bottom: 0; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, var(--fo-line-strong) 50%, var(--fo-line-strong) 58%, transparent 58%, transparent 70%, var(--fo-line-strong) 70%, var(--fo-line-strong) 78%, transparent 78%); }
+.fo-drop { position: absolute; z-index: 41; pointer-events: none; border: 2px solid var(--fo-accent); border-radius: var(--fo-radius-md); background: color-mix(in srgb, var(--fo-accent) 12%, transparent); transition: left .12s, top .12s, width .12s, height .12s; animation: fo-pop .12s ease-out; }
 
 /* chats of this manuscript */
 .fo-chat-switch { position: relative; flex: 1 1 auto; min-width: 0; }

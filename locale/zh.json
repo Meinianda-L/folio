@@ -94,6 +94,7 @@
     "dockRight": "停靠右侧",
     "dockLeft": "停靠左侧",
     "dockBottom": "停靠底部",
-    "dockFloat": "浮动窗口"
+    "dockFloat": "浮动窗口",
+    "dragHint": "拖动可移动 · 拖到边缘即停靠 · 双击切换浮窗/停靠"
   }
 }

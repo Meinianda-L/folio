@@ -15,6 +15,9 @@ const LAYOUT_KEY = 'folio-layout-v1';
 const AUTO_KEY = 'folio-autocompile-v1';
 const ARCHIVED_KEY = 'folio-archived-chats-v1';
 const ENGINES = [['pdflatex', 'pdfLaTeX'], ['xelatex', 'XeLaTeX'], ['tectonic', 'Tectonic']];
+const TOPBAR = 48;
+const FLOAT_MIN = { w: 280, h: 200 };
+const FLOAT_EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 const DEFAULT_LAYOUT = { files: 220, chat: 400, split: 0.5, show: { files: true, editor: true, pdf: true, chat: true } };
 
 /* ───────────── small utilities ───────────── */
@@ -510,6 +513,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   const [archived, setArchived] = useState(() => new Set(readStored(ARCHIVED_KEY, [])));
   const [dialog, setDialog] = useState(null);
   const [compileMenu, setCompileMenu] = useState(false);
+  const [drop, setDrop] = useState(null);
   const rootRef = useRef(null); const editorApi = useRef(null); const uploadRef = useRef(null); const mounted = useRef(true);
   const live = useRef({}); live.current = { project, file, dirty, autoCompile, session, cursor };
   const saving = useRef(null); const saveTimer = useRef(0); const generation = useRef(0);
@@ -772,21 +776,76 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   const floating = visible.chat && !narrow && !chatFills && dock === 'float';
   const centerWidth = Math.max(0, width - (visible.files ? layout.files : 0) - (chatInRow ? layout.chat : 0));
   const float = { w: 420, h: 560, ...(layout.float || {}) };
-  float.w = Math.min(float.w, Math.max(300, width - 16)); float.h = Math.min(float.h, Math.max(240, height - 64));
-  float.x = Math.max(8, Math.min(float.x ?? width - float.w - 16, width - float.w - 8)); float.y = Math.max(56, Math.min(float.y ?? 64, height - float.h - 8));
-  function dragFloat(event, mode) {
-    if (event.button !== 0 || (mode === 'move' && event.target.closest('button, a, input, select, [role=menu], .fo-popover'))) return;
-    event.preventDefault();
-    const origin = { px: event.clientX, py: event.clientY, ...float };
-    rootRef.current?.closest('.fo-root')?.classList.add('is-resizing');
-    const move = next => {
-      const dx = next.clientX - origin.px, dy = next.clientY - origin.py;
-      updateLayout(previous => ({ ...previous, float: mode === 'move'
-        ? { ...float, x: origin.x + dx, y: origin.y + dy }
-        : { ...float, w: Math.max(300, origin.w + dx), h: Math.max(240, origin.h + dy) } }));
+  float.w = Math.max(FLOAT_MIN.w, Math.min(float.w, width)); float.h = Math.max(FLOAT_MIN.h, Math.min(float.h, height - TOPBAR));
+  float.x = Math.max(0, Math.min(float.x ?? width - float.w - 16, width - float.w)); float.y = Math.max(TOPBAR, Math.min(float.y ?? 64, height - float.h));
+  // Follow one pointer gesture on the window, with the given cursor shown everywhere until it ends.
+  function track(cursor, onMove, onUp) {
+    const root = rootRef.current?.closest('.fo-root');
+    root?.classList.add('is-resizing'); if (root) root.style.cursor = cursor;
+    const up = upEvent => {
+      window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
+      root?.classList.remove('is-resizing'); if (root) root.style.cursor = '';
+      onUp?.(upEvent);
     };
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); rootRef.current?.closest('.fo-root')?.classList.remove('is-resizing'); };
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+    window.addEventListener('pointermove', onMove); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+  }
+  // Resize the floating window from any edge or corner; `edge` lists the sides that move.
+  function resizeFloat(event, edge) {
+    if (event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation();
+    const start = { px: event.clientX, py: event.clientY, ...float };
+    const right = start.x + start.w, bottom = start.y + start.h;
+    track(getComputedStyle(event.currentTarget).cursor, next => {
+      const dx = next.clientX - start.px, dy = next.clientY - start.py;
+      let { x, y, w, h } = start;
+      if (edge.includes('e')) w = Math.min(width - x, Math.max(FLOAT_MIN.w, start.w + dx));
+      if (edge.includes('s')) h = Math.min(height - y, Math.max(FLOAT_MIN.h, start.h + dy));
+      if (edge.includes('w')) { x = Math.max(0, Math.min(right - FLOAT_MIN.w, start.x + dx)); w = right - x; }
+      if (edge.includes('n')) { y = Math.max(TOPBAR, Math.min(bottom - FLOAT_MIN.h, start.y + dy)); h = bottom - y; }
+      updateLayout(previous => ({ ...previous, float: { x, y, w, h } }));
+    });
+  }
+  // The dock an assistant dragged to (clientX, clientY) would land in, with its outline in workspace coordinates.
+  function dropAt(clientX, clientY) {
+    const root = rootRef.current?.getBoundingClientRect(), bench = rootRef.current?.querySelector('.fo-bench')?.getBoundingClientRect();
+    if (!root || !bench) return null;
+    const reach = 64, top = bench.top - root.top, left = bench.left - root.left + (show.files ? layout.files + 1 : 0);
+    const columnWidth = Math.min(layout.chat, bench.width / 2), panelHeight = Math.min(layout.chatHeight || 320, bench.height - 120);
+    if (clientX < bench.left + reach) return { zone: 'left', left, top, width: columnWidth, height: bench.height };
+    if (clientX > bench.right - reach) return { zone: 'right', left: bench.right - root.left - columnWidth, top, width: columnWidth, height: bench.height };
+    if (clientY > bench.bottom - reach) return { zone: 'bottom', left, top: top + bench.height - panelHeight, width: bench.right - root.left - left, height: panelHeight };
+    return null;
+  }
+  // Drag the assistant by its header. A docked panel tears off into a window after a few pixels;
+  // releasing near the left, right or bottom edge docks it there, anywhere else leaves it floating.
+  function dragChat(event) {
+    if (event.button !== 0 || narrow || chatFills || event.target.closest('button, a, input, select, [role=menu], .fo-popover')) return;
+    event.preventDefault();
+    const root = rootRef.current.getBoundingClientRect(), pane = event.currentTarget.closest('.fo-pane-chat').getBoundingClientRect();
+    const start = { px: event.clientX, py: event.clientY }, before = layout.float, from = dock;
+    const grab = { x: Math.min(event.clientX - pane.left, float.w - 48), y: Math.min(event.clientY - pane.top, 32) };
+    let torn = floating, target = null;
+    track('grabbing', next => {
+      if (!torn && Math.hypot(next.clientX - start.px, next.clientY - start.py) < 6) return;
+      const x = Math.max(0, Math.min(width - float.w, next.clientX - root.left - grab.x));
+      const y = Math.max(TOPBAR, Math.min(height - float.h, next.clientY - root.top - grab.y));
+      updateLayout(previous => ({ ...previous, dock: 'float', lastDock: torn ? previous.lastDock : from, float: { ...float, x, y } }));
+      torn = true;
+      const zone = dropAt(next.clientX, next.clientY);
+      if (zone?.zone !== target?.zone) setDrop(zone);
+      target = zone;
+    }, () => {
+      setDrop(null);
+      // Docking keeps the window's last free position for the next time it floats.
+      if (target) updateLayout(previous => ({ ...previous, dock: target.zone, float: before ?? previous.float }));
+    });
+  }
+  // Double-clicking the header switches between the window and the dock it came from.
+  function toggleFloat(event) {
+    if (narrow || chatFills || event.target.closest('button, a, input, select, [role=menu], .fo-popover')) return;
+    updateLayout(previous => floating
+      ? { ...previous, dock: previous.lastDock && previous.lastDock !== 'float' ? previous.lastDock : 'right' }
+      : { ...previous, dock: 'float', lastDock: dock });
   }
   const jump = problem => {
     const go = () => { setShowIssues(false); setTimeout(() => editorApi.current?.jumpTo(problem.line), 30); if (narrow) setMobilePane('editor'); };
@@ -837,8 +896,8 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
     </div>
   </section>);
   const chatStyle = narrow ? undefined : chatFills ? { flex: '1 1 0' } : dock === 'bottom' ? { height: layout.chatHeight || 320 } : floating ? { left: float.x, top: float.y, width: float.w, height: float.h } : { width: layout.chat };
-  const chatPane = visible.chat && (<section key="chat" className={`fo-pane fo-pane-chat is-${chatFills ? 'main' : dock}`} style={chatStyle} aria-label={t('assistant')}>
-    <header className="fo-pane-head" onPointerDown={floating ? event => dragFloat(event, 'move') : undefined}>
+  const chatPane = visible.chat && (<section key="chat" className={`fo-pane fo-pane-chat is-${chatFills ? 'main' : dock}${drop ? ' is-dropping' : ''}`} style={chatStyle} aria-label={t('assistant')}>
+    <header className="fo-pane-head" onPointerDown={dragChat} onDoubleClick={toggleFloat} title={narrow || chatFills ? undefined : t('dragHint')}>
       <ChatSwitcher t={t} locale={locale} services={services} directory={project?.directory} currentId={session.id} running={running} onSwitch={id => project && bindSession(project, { target: id })} onNew={() => project && bindSession(project, { fresh: true })} onArchive={archiveChats} archived={archived} />
       <div className="fo-pane-actions">
         <button className="fo-icon-btn" onClick={() => project && bindSession(project, { fresh: true })} disabled={!project || running} title={t('newChat')} aria-label={t('newChat')}><Icon name="plus" /></button>
@@ -851,15 +910,15 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
       {session.reference ? <SessionProvider session={session.reference}>{renderSlot('folio.chat', { sessionId: session.id, onRunning: setRunning })}</SessionProvider>
         : <div className="fo-empty">{session.error ? <><p className="fo-form-error">{session.error}</p><button className="fo-btn" onClick={() => bindSession(live.current.project)}><Icon name="refresh" /> {t('reload')}</button></> : <p className="fo-muted">{t('chatStarting')}</p>}</div>}
     </div>
-    {floating && <div className="fo-float-grip" onPointerDown={event => dragFloat(event, 'resize')} aria-hidden="true" />}
+    {floating && FLOAT_EDGES.map(edge => <div key={edge} className={`fo-float-edge is-${edge}`} onPointerDown={event => resizeFloat(event, edge)} aria-hidden="true" />)}
   </section>);
   const center = [editorPane, visible.editor && visible.pdf && !narrow && <Handle key="h-split" label={t('pdf')} onDrag={dx => updateLayout(previous => ({ ...previous, split: Math.max(0.2, Math.min(0.8, previous.split + dx / Math.max(1, centerWidth))) }))} />, pdfPane].filter(Boolean);
-  const chatHandle = <Handle key="h-chat" label={t('assistant')} onDrag={dx => updateLayout(previous => ({ ...previous, chat: Math.max(300, Math.min(760, previous.chat + (dock === 'left' ? dx : -dx))) }))} />;
+  const chatHandle = <Handle key="h-chat" label={t('assistant')} onDrag={dx => updateLayout(previous => ({ ...previous, chat: Math.max(FLOAT_MIN.w, Math.min(Math.max(FLOAT_MIN.w, width * 0.7), previous.chat + (dock === 'left' ? dx : -dx))) }))} />;
   const bench = narrow ? [filesPane, editorPane, pdfPane, chatPane].filter(Boolean) : [
     filesPane, filesPane && <Handle key="h-files" label={t('files')} onDrag={dx => updateLayout(previous => ({ ...previous, files: Math.max(150, Math.min(420, previous.files + dx)) }))} />,
     chatInRow && dock === 'left' && chatPane, chatInRow && dock === 'left' && chatHandle,
     ...(visible.chat && !chatFills && dock === 'bottom'
-      ? [<div key="center" className="fo-center"><div className="fo-center-row">{center}</div><Handle key="h-bottom" axis="y" label={t('assistant')} onDrag={(_, dy) => updateLayout(previous => ({ ...previous, chatHeight: Math.max(180, Math.min(height - 160, (previous.chatHeight || 320) - dy)) }))} />{chatPane}</div>]
+      ? [<div key="center" className="fo-center"><div className="fo-center-row">{center}</div><Handle key="h-bottom" axis="y" label={t('assistant')} onDrag={(_, dy) => updateLayout(previous => ({ ...previous, chatHeight: Math.max(140, Math.min(height - TOPBAR - 120, (previous.chatHeight || 320) - dy)) }))} />{chatPane}</div>]
       : center),
     chatInRow && dock === 'right' && chatHandle, chatInRow && dock === 'right' && chatPane,
     visible.chat && chatFills && chatPane
@@ -884,6 +943,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
     </header>
     <div className={`fo-bench ${narrow ? 'is-narrow' : ''}`}>{bench}</div>
     {floating && chatPane}
+    {drop && <div className={`fo-drop is-${drop.zone}`} style={{ left: drop.left, top: drop.top, width: drop.width, height: drop.height }} aria-hidden="true" />}
     {dialog && <Dialog title={{ new: t('newFile'), rename: t('renameFile'), delete: t('deleteFile'), title: t('rename') }[dialog.kind]} onClose={() => setDialog(null)}>
       <PromptForm t={t} label={dialog.kind === 'title' ? t('projectName') : t('filePath')} placeholder={t('filePlaceholder')} initial={dialog.kind === 'title' ? project?.name : dialog.kind === 'new' ? '' : dialog.path} danger={dialog.kind === 'delete'} message={dialog.kind === 'delete' ? `${t('deleteFileConfirm')} — ${dialog.path}` : ''} submitLabel={dialog.kind === 'delete' ? t('delete') : dialog.kind === 'new' ? t('create') : t('save')} onCancel={() => setDialog(null)} onSubmit={submitDialog} />
     </Dialog>}

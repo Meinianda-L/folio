@@ -94,6 +94,7 @@
     "dockRight": "Dock right",
     "dockLeft": "Dock left",
     "dockBottom": "Dock bottom",
-    "dockFloat": "Floating window"
+    "dockFloat": "Floating window",
+    "dragHint": "Drag to move · drop at an edge to dock · double-click to float or dock"
   }
 }

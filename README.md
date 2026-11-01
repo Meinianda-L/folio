@@ -26,7 +26,7 @@ Folio is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (
 - **Edits you review.** The assistant reads your files and builds the PDF, but it can only *propose* changes. Each proposal opens as a diff that you apply or discard.
 - **Context without copy-paste.** Each turn quietly tells the model which manuscript, file, cursor line and selection you are on, plus the latest build errors.
 - **Real TeX builds.** pdfLaTeX, XeLaTeX or Tectonic, with BibTeX/Biber and reruns. Errors become a clickable list that jumps to the file and line.
-- **Your layout.** Toggle and resize every panel; dock the assistant right, left or bottom, or float it as a window.
+- **Your layout.** Toggle and resize every panel. Drag the assistant by its header to pull it out into a window, resize the window from any edge or corner, and drop it on the left, right or bottom edge to dock it again.
 
 ## Features
 
@@ -122,6 +122,7 @@ Then restart Harness. If only `client.js` changed, reloading the page is enough.
 | `\` | Command completion |
 | Tab | Next snippet field |
 | ⌘/Ctrl + F | Search and replace |
+| Double-click the assistant header | Switch between floating and docked |
 
 ## Configuration
 
