@@ -1,0 +1,4 @@
+- insert:
+    - id: folio
+      name: dsh-folio
+      config: {}
