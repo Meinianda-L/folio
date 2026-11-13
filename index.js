@@ -68,7 +68,7 @@ export function apply(ctx, config) {
 
   async function userAction(action, args) {
     if (!USER_ACTIONS.has(action)) throw fail('Unknown Folio operation');
-    if (action === 'texStatus') return tex.status({ quick: args.quick === true });
+    if (action === 'texStatus') return tex.status({ quick: args.quick === true, refresh: args.refresh === true });
     if (action === 'setTexBin') return tex.setBin(args.bin);
     if (action === 'testTex') return tex.test();
     if (action === 'listProposals') return { proposals: await proposals.pending(args.projectId) };

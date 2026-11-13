@@ -78,7 +78,8 @@ export class TexEnvironment {
     return value;
   }
   async path() { return (await this.locate()).path; }
-  async status({ quick = false } = {}) {
+  async status({ quick = false, refresh = false } = {}) {
+    if (refresh) this.cached = null;
     const { texBin, tools } = await this.locate();
     if (quick) return { texBin, platform: process.platform, engines: ENGINE_TOOLS.filter(tool => tools[tool]) };
     await fs.mkdir(BIBER_CACHE, { recursive: true, mode: 0o700 });

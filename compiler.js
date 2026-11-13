@@ -51,9 +51,10 @@ function run(command, args, cwd, timeoutMs, searchPath) {
     let timeout = false;
     let settled = false;
     // Do not pass provider keys, shell configuration, or the full host environment to TeX.
+    // max_print_line stops TeX wrapping its log at 79 columns, which would split file:line errors.
     // LuaTeX's font loader reads support files by absolute path, which paranoid mode refuses;
     // restricted mode still refuses dotfiles.
-    const env = { PATH: searchPath || process.env.PATH || '/usr/local/bin:/usr/bin:/bin', HOME: cwd, TMPDIR: cwd, PAR_GLOBAL_TMPDIR: BIBER_CACHE, openin_any: command === 'lualatex' ? 'r' : 'p', openout_any: 'p', shell_escape: 'f', TEXMFOUTPUT: path.join(cwd, 'output'), BIBINPUTS: `${cwd}${path.delimiter}${path.join(cwd, 'output')}${path.delimiter}`, BSTINPUTS: `${cwd}${path.delimiter}`, XDG_CACHE_HOME: process.env.DSH_FOLIO_TEX_CACHE || process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache') };
+    const env = { PATH: searchPath || process.env.PATH || '/usr/local/bin:/usr/bin:/bin', HOME: cwd, TMPDIR: cwd, PAR_GLOBAL_TMPDIR: BIBER_CACHE, max_print_line: '10000', error_line: '254', half_error_line: '238', openin_any: command === 'lualatex' ? 'r' : 'p', openout_any: 'p', shell_escape: 'f', TEXMFOUTPUT: path.join(cwd, 'output'), BIBINPUTS: `${cwd}${path.delimiter}${path.join(cwd, 'output')}${path.delimiter}`, BSTINPUTS: `${cwd}${path.delimiter}`, XDG_CACHE_HOME: process.env.DSH_FOLIO_TEX_CACHE || process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache') };
     const child = spawn(command, args, { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     const append = value => { if (log.length < MAX_LOG) log += value.toString().slice(0, MAX_LOG - log.length); };
     child.stdout.on('data', append);
@@ -126,31 +127,59 @@ export function compileProject({ root, mainFile = 'main.tex', engine = 'pdflatex
   return operation;
 }
 
+const SOURCE_FILE = /^\((\.{0,2}\/[^\s()]+|[A-Za-z]:[\\/][^\s()]+|[^\s()]+\.(?:tex|ltx|sty|cls|bib|bbl|aux|toc|out|def|cfg|clo|fd|tikz|pgf))(?=[\s()]|$)/;
+// A project source as the client names it, or '' for TeX's own files and build output.
+function projectFile(name) {
+  if (!name || name.startsWith('/') || /^[A-Za-z]:/.test(name) || name.startsWith('../')) return '';
+  const relative = name.replace(/^\.\//, '');
+  return relative.startsWith('output/') ? '' : relative;
+}
 // Turn a -file-line-error TeX log into jumpable problems; the raw log stays available.
+// TeX prints "(file" when it starts reading a file and ")" when it finishes, so the open
+// parentheses tell which file a warning's "input line N" belongs to.
 export function parseLog(log = '') {
   const problems = [];
   const seen = new Set();
   const push = item => { const key = `${item.level}|${item.file}|${item.line}|${item.message}`; if (!seen.has(key) && problems.length < 100) { seen.add(key); problems.push(item); } };
   const lines = log.split(/\r?\n/);
+  let stack = [];
+  const located = line => {
+    // Lines count within the file being read; one inside a package cannot be jumped to.
+    const reading = stack.findLast(Boolean);
+    if (reading === undefined) return { file: '', line };
+    const file = projectFile(reading);
+    return { file, line: file ? line : 0 };
+  };
+  const track = text => {
+    for (let at = 0; at < text.length; at += 1) {
+      if (text[at] === '(') { const opened = text.slice(at).match(SOURCE_FILE); stack.push(opened ? opened[1] : null); if (opened) at += opened[0].length - 1; }
+      else if (text[at] === ')') stack.pop();
+    }
+  };
   for (let i = 0; i < lines.length; i += 1) {
+    if (/^This is \S*TeX/.test(lines[i])) stack = [];
     const error = lines[i].match(/^(?:\.\/)?([^:\s][^:]*\.(?:tex|sty|cls|bib|bbl)):(\d+): (.+)$/);
-    if (error) { push({ level: 'error', file: error[1], line: Number(error[2]), message: error[3].trim() }); continue; }
+    // The closing "==> Fatal error occurred" line repeats the position of the real error above it.
+    if (error) { if (!/^==> Fatal error/.test(error[3].trim())) push({ level: 'error', file: error[1], line: Number(error[2]), message: error[3].trim() }); continue; }
     const missing = lines[i].match(/^TeX engine not installed: (.+)$/);
     if (missing) { push({ level: 'error', file: '', line: 0, message: `${missing[1]} was not found. Open TeX environment to locate your TeX installation.`, setup: true }); continue; }
     if (/^! /.test(lines[i])) { push({ level: 'error', file: '', line: 0, message: lines[i].slice(2).trim() }); continue; }
+    // Error context ("l.12 \foo)") quotes the source, whose parentheses are not file markers.
+    if (/^l\.\d+ /.test(lines[i])) continue;
     const warning = lines[i].match(/^(?:LaTeX|Package [\w-]+) Warning: (.+)$/);
     if (warning) {
       let text = warning[1];
       if (/^Shell escape feature is not enabled/.test(text)) continue; // expected: TeX runs without shell escape
       while (!/\.$/.test(text) && i + 1 < lines.length && lines[i + 1].trim() && !/Warning:/.test(lines[i + 1])) text += ' ' + lines[++i].replace(/^\([\w-]+\)\s*/, '').trim();
       const line = text.match(/on input line (\d+)/);
-      push({ level: 'warning', file: '', line: line ? Number(line[1]) : 0, message: text.trim() });
+      push({ level: 'warning', ...located(line ? Number(line[1]) : 0), message: text.trim() });
       continue;
     }
     const bib = lines[i].match(/^(I found no .+|I couldn't open .+|Warning--.+|ERROR - .+|WARN - .+)$/);
     if (bib) { push({ level: 'warning', file: '', line: 0, message: bib[1].replace(/---while reading file .*/, '').trim() }); continue; }
     const box = lines[i].match(/^(Overfull|Underfull) \\[hv]box .* at lines? (\d+)/);
-    if (box) push({ level: 'typesetting', file: '', line: Number(box[2]), message: lines[i].trim() });
+    if (box) push({ level: 'typesetting', ...located(Number(box[2])), message: lines[i].trim() });
+    track(lines[i]);
   }
   return problems;
 }

@@ -120,3 +120,40 @@ test('BibTeX resolves citations and TeX errors are reported with file and line',
   assert.deepEqual(bad.problems.find(item => item.level === 'error'), { level: 'error', file: 'main.tex', line: 3, message: 'Undefined control sequence.' });
   assert.equal((await domain.readPdf(paper.id)).subarray(0, 5).toString(), '%PDF-', 'a failed build keeps the previous PDF');
 });
+
+test('log parsing keeps errors on long paths and gives each warning the file it came from', () => {
+  const long = 'chapters/a-rather-long-chapter-file-name-about-sparse-attention-mechanisms.tex';
+  const problems = parseLog([
+    'This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex)',
+    '(./main.tex',
+    '(/usr/local/texlive/2025/texmf-dist/tex/latex/base/article.cls',
+    'Document Class: article 2024/06/29 v1.4n Standard LaTeX document class',
+    'LaTeX Warning: Something inside the class on input line 77.',
+    ') (./output/main.aux)',
+    'LaTeX Warning: Reference `fig:one\' on page 1 undefined on input line 3.',
+    `(./${long}`,
+    'Overfull \\hbox (12.3pt too wide) in paragraph at lines 5--6',
+    'LaTeX Warning: Citation `missing\' on page 1 undefined on input line 9.',
+    `./${long}:12: Undefined control sequence.`,
+    'l.12 \\undefinedcommand (with a stray parenthesis',
+    `./${long}:12:  ==> Fatal error occurred, no output PDF file produced!`,
+    ')',
+    'LaTeX Warning: Label(s) may have changed on input line 20.'
+  ].join('\n'));
+  assert.deepEqual(problems.map(item => [item.level, item.file, item.line]), [
+    ['warning', '', 0],
+    ['warning', 'main.tex', 3],
+    ['typesetting', long, 5],
+    ['warning', long, 9],
+    ['error', long, 12],
+    ['warning', 'main.tex', 20]
+  ]);
+});
+
+test('text files too large for the editor are listed as binary and can be deleted', async () => {
+  const large = await domain.dispatch('createProject', { name: 'Large', template: 'blank' });
+  await domain.dispatch('uploadFile', { projectId: large.id, path: 'data.csv', base64: Buffer.alloc(2 * 1024 * 1024 + 1, 'a').toString('base64') });
+  assert.equal((await domain.dispatch('listFiles', { projectId: large.id })).files.find(file => file.path === 'data.csv').kind, 'binary');
+  await domain.dispatch('deleteFile', { projectId: large.id, path: 'data.csv', expectedHash: null });
+  assert.deepEqual((await domain.dispatch('listFiles', { projectId: large.id })).files.map(file => file.path), ['main.tex']);
+});

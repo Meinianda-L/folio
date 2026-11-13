@@ -185,6 +185,10 @@
     "expand": "展开",
     "collapse": "折叠",
     "backToLibrary": "返回文稿库",
-    "newProjectShort": "新建文稿"
+    "newProjectShort": "新建文稿",
+    "unsavedBlocked": "当前文件有未能保存的修改，请先处理：重新载入文件，或保留你的版本。",
+    "replaceFiles": "替换文件",
+    "replaceFilesConfirm": "文稿中已有这些文件，继续将替换它们",
+    "replace": "替换"
   }
 }

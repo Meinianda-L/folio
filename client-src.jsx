@@ -30,8 +30,10 @@ const messageOf = error => error?.message || String(error);
 function readStored(key, fallback) { try { const value = localStorage.getItem(key); return value == null ? fallback : JSON.parse(value); } catch { return fallback; } }
 function store(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} }
 const endpoint = file => new URL(file, document.baseURI).toString();
-async function rpc(action, args = {}) {
-  const response = await fetch(endpoint('api/folio'), { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, args }) });
+// `keepalive` lets a small request finish after the page is closed (browsers cap such bodies at 64 KiB).
+async function rpc(action, args = {}, { keepalive = false } = {}) {
+  const payload = JSON.stringify({ action, args });
+  const response = await fetch(endpoint('api/folio'), { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: keepalive && payload.length < 60000 });
   let body;
   try { body = await response.json(); } catch { throw new Error(`Folio service unavailable (HTTP ${response.status}). Restart DSH after installing the plugin.`); }
   if (!body.ok) throw Object.assign(new Error(body.error || 'Request failed'), { code: body.code });
@@ -208,6 +210,8 @@ const latexLanguage = StreamLanguage.define({
       if ((state.math === '$$' && stream.match('$$')) || (state.math === '$' && stream.eat('$')) || (state.math === '\\]' && stream.match('\\]')) || (state.math === '\\)' && stream.match('\\)'))) { state.math = null; return 'meta'; }
       if (state.math === 'env' && stream.match(/^\\end(?=\{)/)) { state.math = null; stream.eat('{'); state.arg = 'end'; return 'keyword'; }
       if (stream.match(/^\\[a-zA-Z@]+/)) return 'variableName';
+      // \% and \$ are escaped characters, not a comment or the end of the formula.
+      if (stream.match(/^\\./)) return 'atom';
       if (stream.match(/^[0-9.]+/)) return 'number';
       if (stream.match(/^[{}[\]]/)) return 'bracket';
       stream.next(); return 'atom';
@@ -812,7 +816,7 @@ const TEX_INSTALL = {
 function TexDialog({ t, onClose }) {
   const [status, setStatus] = useState(null); const [bin, setBin] = useState(''); const [error, setError] = useState('');
   const [saving, setSaving] = useState(false); const [testing, setTesting] = useState(false); const [results, setResults] = useState(null);
-  const load = useCallback(() => { setError(''); return rpc('texStatus').then(value => { setStatus(value); setBin(value.texBin || ''); }).catch(failure => setError(messageOf(failure))); }, []);
+  const load = useCallback(() => { setError(''); return rpc('texStatus', { refresh: true }).then(value => { setStatus(value); setBin(value.texBin || ''); }).catch(failure => setError(messageOf(failure))); }, []);
   useEffect(() => { load(); }, [load]);
   async function saveBin(value) {
     setSaving(true); setError('');
@@ -860,7 +864,7 @@ function Library({ t, locale, projects, loading, onOpen, onCreate, onRename, onD
   const [importing, setImporting] = useState(null); const [importError, setImportError] = useState(''); const [dragging, setDragging] = useState(false);
   const [tex, setTex] = useState(null); const [texOpen, setTexOpen] = useState(false);
   const zipRef = useRef(null); const folderRef = useRef(null); const nameRef = useRef(null);
-  const checkTex = useCallback(() => rpc('texStatus', { quick: true }).then(setTex).catch(() => setTex({ engines: [] })), []);
+  const checkTex = useCallback(() => rpc('texStatus', { quick: true, refresh: true }).then(setTex).catch(() => setTex({ engines: [] })), []);
   useEffect(() => { checkTex(); }, [checkTex]);
   async function runImport(source) {
     if (importing) return;
@@ -1114,7 +1118,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   const loadProposals = useCallback(async () => { const { proposals: list } = await rpc('listProposals', { projectId }); setProposals(list); setReviewing(current => current && !list.some(item => item.id === current) ? null : current); return list; }, [projectId]);
   const replaceFile = value => { generation.current += 1; const next = { ...value, key: `${value.path}#${generation.current}` }; live.current = { ...live.current, file: next, dirty: false }; setFile(next); setDirty(false); setSaveState('saved'); setConflict(false); };
 
-  async function save() {
+  async function save({ urgent = false } = {}) {
     clearTimeout(saveTimer.current);
     if (saving.current) { await saving.current; if (!live.current.dirty) return; }
     const run = (async () => {
@@ -1122,7 +1126,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
         const current = live.current.file;
         setSaveState('saving');
         try {
-          const result = await rpc('writeFile', { projectId, path: current.path, content: current.content, expectedHash: current.hash });
+          const result = await rpc('writeFile', { projectId, path: current.path, content: current.content, expectedHash: current.hash }, { keepalive: urgent });
           const latest = live.current.file;
           if (!latest || latest.key !== current.key) return;
           const stillDirty = latest.content !== current.content;
@@ -1139,17 +1143,38 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
     try { await run; } finally { if (saving.current === run) saving.current = null; }
   }
   const saveQuietly = () => save().catch(error => toast(messageOf(error), 'error'));
+  // Save before replacing or leaving the open file. Edits that could not be written (the file
+  // changed on disk, or the request failed) stay in the editor instead of being dropped.
+  async function flushEdits() {
+    await save();
+    if (live.current.dirty) throw new Error(t('unsavedBlocked'));
+  }
+  const leave = async () => { try { await flushEdits(); onExit(); } catch (error) { toast(messageOf(error), 'error'); } };
+  const saveRef = useRef(save); saveRef.current = save;
+  useEffect(() => {
+    // Typing is saved after a short pause; closing or hiding the page must not lose that pause.
+    const hidden = () => { if (document.visibilityState === 'hidden' && live.current.dirty) saveRef.current({ urgent: true }).catch(() => {}); };
+    const closing = event => { if (live.current.dirty) { saveRef.current({ urgent: true }).catch(() => {}); event.preventDefault(); event.returnValue = ''; } };
+    document.addEventListener('visibilitychange', hidden); window.addEventListener('pagehide', hidden); window.addEventListener('beforeunload', closing);
+    return () => {
+      document.removeEventListener('visibilitychange', hidden); window.removeEventListener('pagehide', hidden); window.removeEventListener('beforeunload', closing);
+      // Leaving Folio for another Harness page unmounts the workspace: write what is pending.
+      if (live.current.dirty) saveRef.current({ urgent: true }).catch(() => {});
+    };
+  }, []);
 
+  // Resolves true once `path` is the open file.
   async function openFile(path) {
     try {
-      await save();
+      await flushEdits();
       const entry = files.find(item => item.path === path) || { path, kind: isTextPath(path) ? 'text' : 'binary' };
       setReviewing(null);
-      if (entry.kind !== 'text') { replaceFile({ path, kind: entry.kind, content: '', hash: null }); return; }
+      if (entry.kind !== 'text') { replaceFile({ path, kind: entry.kind, content: '', hash: null }); return true; }
       const result = await rpc('readFile', { projectId, path });
       replaceFile({ ...result, kind: 'text' });
       if (narrow) setMobilePane('editor');
-    } catch (error) { toast(messageOf(error), 'error'); }
+      return true;
+    } catch (error) { toast(messageOf(error), 'error'); return false; }
   }
 
   async function compile() {
@@ -1183,7 +1208,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
         await loadProposals();
       } catch (error) { if (!cancelled) toast(messageOf(error), 'error'); }
     })();
-    return () => { cancelled = true; clearTimeout(saveTimer.current); };
+    return () => { cancelled = true; };
   }, [projectId]);
 
   async function workspaceOf(info) {
@@ -1288,15 +1313,21 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
     } catch (error) { toast(error.code === 'CONFLICT' ? t('conflict') : messageOf(error), 'error'); }
   }
 
-  async function upload(list) {
+  async function uploadNow(list, overwrite) {
     for (const item of list) {
-      try {
-        const base64 = await fileToBase64(item);
-        const exists = files.some(entry => entry.path === item.name);
-        await rpc('uploadFile', { projectId, path: item.name, base64, overwrite: exists });
-      } catch (error) { toast(`${item.name}: ${messageOf(error)}`, 'error'); }
+      try { await rpc('uploadFile', { projectId, path: item.name, base64: await fileToBase64(item), overwrite }); }
+      catch (error) { toast(`${item.name}: ${messageOf(error)}`, 'error'); }
     }
     await loadFiles().catch(() => {});
+    // The open file was replaced on disk: show the new content rather than the stale buffer.
+    const open = live.current.file;
+    if (overwrite && open?.kind === 'text' && list.some(item => item.name === open.path)) await rpc('readFile', { projectId, path: open.path }).then(result => replaceFile({ ...result, kind: 'text' })).catch(() => {});
+  }
+  // New files upload at once; files that would replace existing ones wait for a confirmation.
+  async function upload(list) {
+    const existing = list.filter(item => files.some(entry => entry.path === item.name));
+    await uploadNow(list.filter(item => !existing.includes(item)), false);
+    if (existing.length) setDialog({ kind: 'overwrite', items: existing });
   }
   async function fileAction(kind, path) {
     if (kind === 'main') { try { setProject(await rpc('updateProject', { projectId, mainFile: path })); } catch (error) { toast(messageOf(error), 'error'); } return; }
@@ -1306,7 +1337,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   async function submitDialog(value) {
     const { kind, path } = dialog;
     if (kind === 'new') {
-      await save();
+      await flushEdits();
       await rpc('writeFile', { projectId, path: value, content: '', expectedHash: null });
       await loadFiles();
       replaceFile({ ...(await rpc('readFile', { projectId, path: value })), kind: 'text' });
@@ -1323,6 +1354,8 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
       await rpc('deleteFile', { projectId, path, expectedHash: hash });
       const list = await loadFiles();
       if (live.current.file?.path === path) { setFile(null); live.current = { ...live.current, file: null, dirty: false }; const next = list.find(item => item.kind === 'text'); if (next) openFile(next.path); }
+    } else if (kind === 'overwrite') {
+      await uploadNow(dialog.items, true);
     } else if (kind === 'title') {
       setProject(await rpc('updateProject', { projectId, name: value }));
     }
@@ -1476,7 +1509,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
     '-',
     { label: t('compile'), icon: 'play', hint: `${MOD}↵`, disabled: compiling, run: () => compileRef.current() },
     { label: t('texEnv'), icon: 'gear', run: () => setTexOpen(true) },
-    { label: t('backToLibrary'), icon: 'back', run: async () => { await save().catch(() => {}); onExit(); } }
+    { label: t('backToLibrary'), icon: 'back', run: leave }
   ];
   function editorMenu(event, view) {
     // Right-clicking outside the selection moves the cursor there first, as native editors do.
@@ -1520,7 +1553,10 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   }
   const jump = problem => {
     const go = () => { setShowIssues(false); setTimeout(() => editorApi.current?.jumpTo(problem.line), 30); if (narrow) setMobilePane('editor'); };
-    if (problem.file && problem.file !== file?.path && files.some(item => item.path === problem.file)) openFile(problem.file).then(go); else if (problem.line) go();
+    if (!problem.line) return;
+    // A problem names its file; jump there, never to the same line number of another file.
+    if (!problem.file || problem.file === file?.path) go();
+    else if (files.some(item => item.path === problem.file)) openFile(problem.file).then(opened => { if (opened) go(); });
   };
 
   const filesPane = visible.files && (<section key="files" className="fo-pane fo-pane-files" style={narrow ? undefined : { width: layout.files }}>
@@ -1563,7 +1599,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
         : <div className="fo-empty fo-empty-pdf"><div className="fo-sheet" aria-hidden="true"><span /><span /><span /><span /></div><h3>{t('noPdf')}</h3><p>{t('noPdfHint')}</p><button className="fo-btn is-primary" onClick={() => compileRef.current()} disabled={compiling}><Icon name="play" fill size={13} /> {t('compile')}</button></div>}
       {showIssues && build && <div className="fo-issues is-over">
         <h3 className="fo-caps">{t('issues')} {errorCount > 0 && <span className="is-error">{errorCount} {t('errors')}</span>} {warningCount > 0 && <span className="is-warning">{warningCount} {t('warnings')}</span>}</h3>
-        {problems.length ? <ul>{problems.map((problem, i) => <li key={i} className={`is-${problem.level}`}><button onClick={() => problem.setup ? setTexOpen(true) : jump(problem)} disabled={!problem.line && !problem.setup}><span className="fo-issue-dot" /><span className="fo-issue-text">{problem.message}</span>{problem.line ? <code>{problem.file || file?.path || ''}:{problem.line}</code> : null}</button></li>)}</ul> : <p className="fo-muted">{t('noIssues')}</p>}
+        {problems.length ? <ul>{problems.map((problem, i) => <li key={i} className={`is-${problem.level}`}><button onClick={() => problem.setup ? setTexOpen(true) : jump(problem)} disabled={!problem.line && !problem.setup}><span className="fo-issue-dot" /><span className="fo-issue-text">{problem.message}</span>{problem.line ? <code>{problem.file ? `${problem.file}:` : `${t('line')} `}{problem.line}</code> : null}</button></li>)}</ul> : <p className="fo-muted">{t('noIssues')}</p>}
         {build.log && <details><summary>{t('rawLog')}</summary><pre>{build.log}</pre></details>}
       </div>}
     </div>
@@ -1600,7 +1636,7 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   return <div className="fo-workspace" ref={rootRef} onContextMenu={event => { if (event.target.closest('input, textarea, select, a[href], .fo-chat-body, .fo-menu, .fo-popover, .fo-dialog')) return; openMenu(event, paneItems()); }}>
     <header className="fo-topbar">
       <div className="fo-topbar-left">
-        <button className="fo-home" onClick={async () => { await save().catch(() => {}); onExit(); }} title={t('back')} aria-label={t('back')}><FolioMark /><span>Folio</span></button>
+        <button className="fo-home" onClick={leave} title={t('back')} aria-label={t('back')}><FolioMark /><span>Folio</span></button>
         <span className="fo-slash">/</span>
         <button className="fo-title" onClick={() => project && setDialog({ kind: 'title' })} title={t('rename')}>{project?.name || '…'}</button>
       </div>
@@ -1619,8 +1655,8 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
     {texOpen && <TexDialog t={t} onClose={() => setTexOpen(false)} />}
     {menu && <Menu anchor={menu.anchor} items={menu.items} onClose={() => setMenu(null)} />}
     {drop && <div className={`fo-drop is-${drop.zone}`} style={{ left: drop.left, top: drop.top, width: drop.width, height: drop.height }} aria-hidden="true" />}
-    {dialog && <Dialog title={{ new: t('newFile'), rename: t('renameFile'), delete: t('deleteFile'), title: t('rename') }[dialog.kind]} onClose={() => setDialog(null)}>
-      <PromptForm t={t} label={dialog.kind === 'title' ? t('projectName') : t('filePath')} placeholder={t('filePlaceholder')} initial={dialog.kind === 'title' ? project?.name : dialog.kind === 'new' ? dialog.path || '' : dialog.path} danger={dialog.kind === 'delete'} message={dialog.kind === 'delete' ? `${t('deleteFileConfirm')} — ${dialog.path}` : ''} submitLabel={dialog.kind === 'delete' ? t('delete') : dialog.kind === 'new' ? t('create') : t('save')} onCancel={() => setDialog(null)} onSubmit={submitDialog} />
+    {dialog && <Dialog title={{ new: t('newFile'), rename: t('renameFile'), delete: t('deleteFile'), title: t('rename'), overwrite: t('replaceFiles') }[dialog.kind]} onClose={() => setDialog(null)}>
+      <PromptForm t={t} label={dialog.kind === 'title' ? t('projectName') : t('filePath')} placeholder={t('filePlaceholder')} initial={dialog.kind === 'title' ? project?.name : dialog.kind === 'new' ? dialog.path || '' : dialog.path} danger={dialog.kind === 'delete' || dialog.kind === 'overwrite'} message={dialog.kind === 'delete' ? `${t('deleteFileConfirm')} — ${dialog.path}` : dialog.kind === 'overwrite' ? `${t('replaceFilesConfirm')} — ${dialog.items.map(item => item.name).join(', ')}` : ''} submitLabel={dialog.kind === 'delete' ? t('delete') : dialog.kind === 'overwrite' ? t('replace') : dialog.kind === 'new' ? t('create') : t('save')} onCancel={() => setDialog(null)} onSubmit={submitDialog} />
     </Dialog>}
   </div>;
 }

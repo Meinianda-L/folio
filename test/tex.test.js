@@ -27,6 +27,21 @@ test('a chosen TeX folder is validated, remembered and searched first', { skip: 
   assert.equal((await fresh.setBin('')).texBin, '');
 });
 
+test('re-detecting finds a TeX engine installed moments after the last check', { skip: process.platform === 'win32' }, async () => {
+  const bin = path.join(scratch, 'late');
+  await mkdir(bin);
+  const original = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${original}`;
+  try {
+    const env = new TexEnvironment({ settingsFile: path.join(scratch, 'late.json') });
+    const before = (await env.status({ quick: true })).engines.includes('tectonic');
+    await writeFile(path.join(bin, 'tectonic'), '#!/bin/sh\necho tectonic\n');
+    await chmod(path.join(bin, 'tectonic'), 0o755);
+    assert.equal((await env.status({ quick: true })).engines.includes('tectonic'), before);
+    assert.equal((await env.status({ quick: true, refresh: true })).engines.includes('tectonic'), true);
+  } finally { process.env.PATH = original; }
+});
+
 test('SyncTeX maps source lines to PDF boxes and back, across included files', { skip: spawnSync('synctex', ['help', 'view']).error && 'synctex not installed' }, async () => {
   const { FolioDomain } = await import('../domain.js');
   const domain = new FolioDomain({ root: path.join(scratch, 'projects') });

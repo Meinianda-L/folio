@@ -110,7 +110,8 @@ export class FolioDomain {
         else if (stat.isFile()) {
           bytes += stat.size;
           if (files.length >= MAX_FILES || bytes > MAX_PROJECT) throw fail('Project file or size limit exceeded', 'LIMIT_EXCEEDED');
-          files.push({ path: name, size: stat.size, kind: kindOf(name) });
+          // A text file too large for the editor is listed as binary: kept, compiled, deletable.
+          files.push({ path: name, size: stat.size, kind: kindOf(name) === 'text' && stat.size > MAX_FILE ? 'binary' : kindOf(name) });
         }
       }
     }
@@ -245,7 +246,7 @@ export class FolioDomain {
       if (stat.size > MAX_UPLOAD) throw fail('File exceeds 10 MiB', 'LIMIT_EXCEEDED');
       return { bytes: await fs.readFile(target), type: MIME[extensionOf(args.path)] || 'application/octet-stream' };
     }
-    if (action === 'deleteFile' && stat && kindOf(args.path) !== 'text') {
+    if (action === 'deleteFile' && stat && (kindOf(args.path) !== 'text' || stat.size > MAX_FILE)) {
       await fs.unlink(target);
       await removeEmptyParents(root, target);
       await this.saveMeta(root, {});

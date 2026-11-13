@@ -185,6 +185,10 @@
     "expand": "Expand",
     "collapse": "Collapse",
     "backToLibrary": "Back to library",
-    "newProjectShort": "New manuscript"
+    "newProjectShort": "New manuscript",
+    "unsavedBlocked": "This file has changes that could not be saved. Resolve them first: reload the file or keep your version.",
+    "replaceFiles": "Replace files",
+    "replaceFilesConfirm": "These files already exist in the manuscript and will be replaced",
+    "replace": "Replace"
   }
 }
