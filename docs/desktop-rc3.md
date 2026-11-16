@@ -30,5 +30,5 @@ Folio 原来的运行依赖固定安装 `0.2.1-rc.2` 的 `dsh-tools`、`dsh-llm`
 
 验证环境为 macOS 27.0.1（Apple Silicon）、Desktop 0.2.2-rc.3、Node 24.21.0、MacTeX / TeX Live 2026。
 
-系统原装 Biber 2.21 的 universal 启动程序调用 lipo 时失败；同一文件经系统 lipo 提取的 arm64 版本可运行，代码签名验证通过。这属于本机 TeX 工具环境问题，不改 Folio 的编译逻辑。原件已备份，替换需要用户管理员授权；参考文献完整环境验证待此步骤完成。
+系统原装 Biber 2.21 的 universal 启动程序调用 lipo 时失败；同一文件经系统 lipo 提取的 arm64 版本可运行，代码签名验证通过。这属于本机 TeX 工具环境问题，不改 Folio 的编译逻辑。原件已备份，替换需要用户管理员授权。使用待替换的 arm64 文件在临时验证目录运行 Folio 的 TeX 环境测试，pdfLaTeX、BibTeX、Biber、XeLaTeX、中文 ctex、LuaLaTeX 六项全部成功；系统原件的替换仍待用户完成，不把临时测试结果表述为系统 Biber 已修复。
 
