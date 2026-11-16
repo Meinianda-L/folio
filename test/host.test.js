@@ -8,10 +8,10 @@ import { apply, RPC_PATH, PDF_PATH } from '../index.js';
 // A minimal Host stand-in: captures the fetch routes, the tool and the pre-step waterfall listener.
 function fixture(root) {
   const routes = new Map(), disposers = [];
-  let tool, preStep;
+  let tool, activation, preStep;
   const ctx = {
     connection: { fetch: { register(route) { routes.set(route.path, route); return () => routes.delete(route.path); } } },
-    tools: { register(value) { tool = value; } },
+    tools: { register(value, options) { tool = value; activation = options.when; } },
     on(name, listener) { if (name === 'agent/pre-step') preStep = listener; },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') disposers.push(dispose); }
   };
@@ -25,7 +25,7 @@ function fixture(root) {
     return body.value;
   }
   const step = async (target, number = 1) => preStep({ agent: target, step: number, signal: new AbortController().signal }, async () => ({ kind: 'continue', messages: [{ role: 'user', marker: 'original' }] }));
-  return { routes, rpc, step, agent, get tool() { return tool; }, get guard() { return guard; }, get restrictedTo() { return restrictedTo; }, dispose: () => disposers.forEach(fn => fn()) };
+  return { routes, rpc, step, agent, active: target => activation({ agent: target }), get tool() { return tool; }, get guard() { return guard; }, get restrictedTo() { return restrictedTo; }, dispose: () => disposers.forEach(fn => fn()) };
 }
 
 test('owner routes serve projects, files and the last PDF', async () => {
@@ -52,6 +52,9 @@ test('bound writing sessions get hidden workspace context, a restricted toolset 
     const writing = host.agent('writing-session'), unrelated = host.agent('other-session');
     await host.rpc('updateProject', { projectId: project.id, sessionId: writing.id });
     await host.rpc('focus', { projectId: project.id, sessionId: writing.id, path: 'main.tex', line: 2, selection: '\\begin{document}', selectionFrom: 2, selectionTo: 2 });
+
+    assert.equal(await host.active(unrelated), false, 'ordinary chats do not advertise the Folio tool');
+    assert.equal(await host.active(writing), true, 'bound chats activate the Folio tool');
 
     const plain = await host.step(unrelated);
     assert.equal(plain.messages.length, 1, 'other sessions are untouched');
@@ -81,6 +84,7 @@ test('bound writing sessions get hidden workspace context, a restricted toolset 
 
     await host.rpc('updateProject', { projectId: project.id, sessionId: 'fresh-chat' });
     assert.equal(host.restrictedTo, null, 'a replaced chat loses the writing restriction');
+    assert.equal(await host.active(writing), false, 'replaced chats no longer activate the Folio tool');
     assert.match((await call({ action: 'readFile', path: 'main.tex' })).error, /not a Folio writing session/);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });

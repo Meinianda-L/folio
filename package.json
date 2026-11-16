@@ -1,12 +1,12 @@
 {
   "name": "dsh-folio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
-  "description": "Folio — a LaTeX writing workspace for DeepSeek Harness: source editor, PDF builds, and AI edits you review, through the native Harness chat.",
+  "description": "Folio — LaTeX writing workspace for DeepSeek Harness Desktop and Web.",
   "engines": {
-    "node": ">=24",
-    "dsh": ">=0.2.1-rc.2 <0.3.0"
+    "node": ">=24.9",
+    "dsh": ">=0.2.2-rc.3 <0.2.3-0"
   },
   "exports": {
     ".": "./index.js",
@@ -48,9 +48,7 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
-    "@deepseek-ai/schemastery": "^3.18.0"
+    "@deepseek-ai/schemastery": "~3.19.0"
   },
   "scripts": {
     "build": "node build-client.mjs",
@@ -75,11 +73,29 @@
     "codemirror": "^6.0.2",
     "diff": "^5.2.2",
     "esbuild": "^0.21.5",
-    "pdfjs-dist": "^4.10.38"
+    "pdfjs-dist": "^4.10.38",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-error": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-scope": "0.2.2-rc.3",
+    "@codemirror/commands": "^6.11.1"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Meinianda-L/folio.git"
+    "url": "git+https://github.com/xty13114150041/folio.git"
   },
-  "homepage": "https://github.com/Meinianda-L/folio#readme"
+  "homepage": "https://github.com/xty13114150041/folio#readme",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.3 <0.2.3-0",
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.3 <0.2.3-0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  }
 }

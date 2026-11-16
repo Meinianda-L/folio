@@ -19,6 +19,12 @@
 
 Folio 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）插件。它在 Harness 侧栏加入 **Folio 写作** 页面：在这里写 LaTeX、编译成 PDF，并与 AI 助手协作。助手使用你在 Harness 里已配置好的模型。一切都在本机完成：文稿就是磁盘上的普通文件夹，TeX 在本机运行，不需要额外账号或 API Key。
 
+## 桌面版适配分支
+
+本分支适配 **DeepSeek Harness Desktop 与 Web 0.2.2-rc.3**，包含上游截至 2026-11-13 的最新修复。原项目：[Meinianda-L/folio](https://github.com/Meinianda-L/folio)。
+
+DSH 核心包改由宿主提供，仅声明为可选 peer 依赖；不会再随 Folio 安装旧副本、覆盖桌面端核心组件。Folio 工具只在文稿绑定的写作会话中启用。开发测试所需的 DSH 包不会进入发布安装包；请安装发布包，避免直接链接带有 `node_modules` 的开发目录。
+
 ## 亮点
 
 - **与 Harness 浑然一体**：颜色、字体、圆角和明暗主题全部取自宿主的设计令牌。
@@ -113,7 +119,7 @@ Folio 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harne
 
 ## 环境要求
 
-- **DeepSeek Harness** `0.2.1-rc.2` 系列（web profile）与 **Node.js 24+**。
+- **DeepSeek Harness** Desktop 或 Web `0.2.2-rc.3` 与 **Node.js 24.9+**。
 - 启动 Harness 时 `PATH` 中有 **TeX 发行版**：
   - macOS：[MacTeX](https://www.tug.org/mactex/) / TeX Live（`pdflatex`、`xelatex`、`bibtex`、`biber`）。
   - Linux：`texlive-latex-base texlive-latex-recommended texlive-latex-extra texlive-xetex`；中文再加 `texlive-lang-chinese` 和中文字体。
@@ -122,23 +128,19 @@ Folio 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harne
 
 ## 安装
 
-```bash
-git clone https://github.com/Meinianda-L/folio.git
-cd folio
-npm install --omit=dev
-dsh plugin --profile web add "$(pwd)"
+桌面端打开 **插件 → 添加插件**，填入：
+
+```text
+https://github.com/xty13114150041/folio/releases/download/v0.2.1/dsh-folio-0.2.1.tgz
 ```
 
-重启 `dsh web`，在 Harness 侧栏打开 **Folio 写作**。仓库已附带构建好的浏览器端文件 `client.js`，直接使用无需构建。
-
-之后更新：
+也可以用 CLI（独立 Web 宿主把 profile 改为 `web`）：
 
 ```bash
-git pull
-npm install --omit=dev
+dsh plugin --profile desktop add https://github.com/xty13114150041/folio/releases/download/v0.2.1/dsh-folio-0.2.1.tgz
 ```
 
-然后重启 Harness。若只更新了 `client.js`，刷新页面即可。
+完全退出并重新打开 Harness。发布包已带前端构建产物，无需自行配置 Node 或构建；更新时用同样方式安装新版发布包。
 
 ## 使用
 
@@ -214,7 +216,7 @@ Harness 网页端                              Harness 宿主（Node）
 ## 开发
 
 ```bash
-npm install           # 包含构建工具链
+npm install --legacy-peer-deps  # DSH 测试依赖与构建工具链
 npm run build         # 把 client-src.jsx 与 client.css 打包成 client.js
 npm test              # 领域、建议与宿主测试（本机装有 pdfLaTeX/BibTeX 时会真实编译）
 ```

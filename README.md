@@ -19,6 +19,12 @@
 
 Folio is a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin. It adds a **Folio** page to the Harness sidebar where you write LaTeX, typeset it to PDF, and work with an AI assistant that runs on the models you have already configured in Harness. Everything is local: manuscripts are plain folders on your disk, TeX runs on your machine, and there are no extra accounts or API keys.
 
+## Desktop compatibility fork
+
+This fork targets DeepSeek Harness Desktop and Web **0.2.2-rc.3** and includes the latest upstream fixes from 2026-11-13. Upstream: [Meinianda-L/folio](https://github.com/Meinianda-L/folio).
+
+DSH core packages are supplied by Harness as optional peer dependencies, not installed as Folio runtime dependencies. This avoids older copies overriding the Desktop Host. The Folio tool is activated only for the manuscript's bound writing session. Development-only DSH packages are excluded from the release archive; install a release package rather than linking a development checkout with its own `node_modules`.
+
 ## Highlights
 
 - **Looks and feels like Harness.** Every color, font, radius and the light/dark theme come from the host's design tokens.
@@ -113,7 +119,7 @@ Open **TeX environment** from the library (the TeX status pill) or the Compile m
 
 ## Requirements
 
-- **DeepSeek Harness** `0.2.1-rc.2` series (web profile) and **Node.js 24+**.
+- **DeepSeek Harness** Desktop or Web `0.2.2-rc.3` and **Node.js 24.9+**.
 - A **TeX distribution** on the `PATH` that Harness starts with:
   - macOS: [MacTeX](https://www.tug.org/mactex/) / TeX Live (`pdflatex`, `xelatex`, `bibtex`, `biber`).
   - Linux: `texlive-latex-base texlive-latex-recommended texlive-latex-extra texlive-xetex`; for Chinese add `texlive-lang-chinese` and CJK fonts.
@@ -122,23 +128,19 @@ Open **TeX environment** from the library (the TeX status pill) or the Compile m
 
 ## Installation
 
-```bash
-git clone https://github.com/Meinianda-L/folio.git
-cd folio
-npm install --omit=dev
-dsh plugin --profile web add "$(pwd)"
+In Desktop, open **Plugins → Add plugin** and install:
+
+```text
+https://github.com/xty13114150041/folio/releases/download/v0.2.1/dsh-folio-0.2.1.tgz
 ```
 
-Restart `dsh web` and open **Folio** in the Harness sidebar. The repository ships the built browser bundle (`client.js`), so no build step is needed to use it.
-
-To update later:
+Or use the CLI (`--profile web` for a standalone Web host):
 
 ```bash
-git pull
-npm install --omit=dev
+dsh plugin --profile desktop add https://github.com/xty13114150041/folio/releases/download/v0.2.1/dsh-folio-0.2.1.tgz
 ```
 
-Then restart Harness. If only `client.js` changed, reloading the page is enough.
+Fully quit and reopen Harness. The release includes the built browser bundle, so no Node setup or build is needed. To update, install the newer release archive in the same way.
 
 ## Usage
 
@@ -214,7 +216,7 @@ Builds run one at a time (at most 4 queued) in a temporary snapshot of the proje
 ## Development
 
 ```bash
-npm install           # includes the build toolchain
+npm install --legacy-peer-deps  # DSH test dependencies and the build toolchain
 npm run build         # bundles client-src.jsx + client.css into client.js
 npm test              # domain, proposals and host tests (real pdfLaTeX/BibTeX when installed)
 ```
