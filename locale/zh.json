@@ -80,6 +80,8 @@
     "chatHint": "询问文稿、改写段落或修复编译错误。修改以建议形式出现，由你审阅。",
     "diskChanged": "该文件在磁盘上已被修改。",
     "reload": "重新载入",
+    "renderFailed": "Folio 无法绘制这个工作区",
+    "resetLayout": "重置布局并重新打开",
     "overwrite": "保留我的",
     "close": "关闭",
     "required": "请输入名称。",

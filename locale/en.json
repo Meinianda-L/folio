@@ -80,6 +80,8 @@
     "chatHint": "Ask about your manuscript, revise a passage, or fix a build error. Edits arrive as suggestions you review.",
     "diskChanged": "This file changed on disk.",
     "reload": "Reload",
+    "renderFailed": "Folio could not draw this workspace",
+    "resetLayout": "Reset layout and reopen",
     "overwrite": "Keep mine",
     "close": "Close",
     "required": "Please enter a name.",

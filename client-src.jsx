@@ -24,6 +24,37 @@ const FLOAT_MIN = { w: 280, h: 200 };
 const FLOAT_EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 const DEFAULT_LAYOUT = { files: 220, chat: 400, split: 0.5, show: { files: true, editor: true, pdf: true, chat: true } };
 
+// A stored layout may come from an older or edited build, or be hand-edited, so never trust its
+// shape: docks, sizes and the visible panes are all clamped to values the workspace can render.
+function normalizeLayout(stored) {
+  const saved = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+  const number = (value, fallback, min, max) => {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+  };
+  const dock = ['right', 'left', 'bottom', 'float'].includes(saved.dock) ? saved.dock : 'right';
+  const show = { ...DEFAULT_LAYOUT.show };
+  for (const pane of Object.keys(show)) if (typeof saved.show?.[pane] === 'boolean') show[pane] = saved.show[pane];
+  // The workspace always needs something to show: source, PDF and the assistant cannot all be off.
+  if (!show.editor && !show.pdf && !show.chat) show.editor = true;
+  const float = { w: number(saved.float?.w, 420, FLOAT_MIN.w, 10000), h: number(saved.float?.h, 560, FLOAT_MIN.h, 10000) };
+  // Only keep a position the user actually chose; otherwise the window places itself as before.
+  if (Number.isFinite(Number(saved.float?.x))) float.x = Number(saved.float.x);
+  if (Number.isFinite(Number(saved.float?.y))) float.y = Number(saved.float.y);
+  return {
+    ...DEFAULT_LAYOUT,
+    ...saved,
+    dock,
+    show,
+    files: number(saved.files, DEFAULT_LAYOUT.files, 150, 420),
+    chat: number(saved.chat, DEFAULT_LAYOUT.chat, FLOAT_MIN.w, 1200),
+    chatHeight: number(saved.chatHeight, 320, 140, 2000),
+    split: number(saved.split, DEFAULT_LAYOUT.split, 0.2, 0.8),
+    float,
+    lastDock: ['right', 'left', 'bottom', 'float'].includes(saved.lastDock) ? saved.lastDock : undefined
+  };
+}
+
 /* ───────────── small utilities ───────────── */
 
 const messageOf = error => error?.message || String(error);
@@ -457,12 +488,22 @@ const PDF_VIEW_KEY = 'folio-pdf-view-v1';
 const PDF_PAD = 16, PDF_GAP = 12, CSS_UNITS = 96 / 72;
 const ZOOM_LEVELS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
 const clampZoom = zoom => Math.max(0.25, Math.min(5, zoom));
-let pdfWorker = null;
-function ensurePdfWorker() {
-  // The PDF.js worker ships inside client.js; a Blob URL runs it on the Harness origin.
-  if (pdfWorker) return;
-  pdfWorker = new Worker(URL.createObjectURL(new Blob([__PDF_WORKER__], { type: 'text/javascript' })), { type: 'module' });
-  pdfjs.GlobalWorkerOptions.workerPort = pdfWorker;
+let pdfWorkerUrl = null;
+// One worker per load, passed explicitly to getDocument. Sharing a single port through
+// GlobalWorkerOptions breaks as soon as a document is destroyed (switching dock, closing the
+// preview, rebuilding): pdf.js marks the shared PDFWorker `_pendingDestroy`, and the next
+// getDocument on that port throws "PDFWorker.fromPort - the worker is being destroyed". Passing
+// the worker explicitly keeps `task._worker` unset, so destroying one document can never mark
+// the worker of another as pending and poison the next load.
+function createPdfWorker() {
+  // The PDF.js worker ships inside client.js; one Blob URL runs it on the Harness origin.
+  pdfWorkerUrl ||= URL.createObjectURL(new Blob([__PDF_WORKER__], { type: 'text/javascript' }));
+  const port = new Worker(pdfWorkerUrl, { type: 'module' });
+  return { port, worker: new pdfjs.PDFWorker({ port }) };
+}
+function releasePdfWorker(handle) {
+  try { handle?.worker?.destroy(); } catch {}
+  try { handle?.port?.terminate(); } catch {}
 }
 
 function PdfPage({ pdf, number, size, scale, near, marks }) {
@@ -535,6 +576,8 @@ function PdfViewer({ t, url, apiRef, onInverse, onMenu, downloadName }) {
   const [marks, setMarks] = useState(null);
   const [zoomMenu, setZoomMenu] = useState(null);
   const pending = useRef(null); const docRef = useRef(null); const liveScale = useRef(0);
+  // The worker that belongs to the document currently on screen, released together with it.
+  const workerRef = useRef(null);
   const { width, height } = useElementSize(scroller);
   useEffect(() => { store(PDF_VIEW_KEY, view); }, [view]);
 
@@ -551,14 +594,14 @@ function PdfViewer({ t, url, apiRef, onInverse, onMenu, downloadName }) {
   // Load each new build; keep showing the previous one until the new one is ready.
   useEffect(() => {
     if (!url) return;
-    ensurePdfWorker();
+    const handle = createPdfWorker();
     let cancelled = false, loaded = false;
-    const task = pdfjs.getDocument({ url, isEvalSupported: false, enableXfa: false });
+    const task = pdfjs.getDocument({ url, worker: handle.worker, isEvalSupported: false, enableXfa: false });
     task.promise.then(async pdf => {
       loaded = true;
       const list = [];
       for (let i = 1; i <= pdf.numPages; i += 1) { const viewport = (await pdf.getPage(i)).getViewport({ scale: 1 }); list.push({ w: viewport.width, h: viewport.height }); }
-      if (cancelled) { pdf.destroy(); return; }
+      if (cancelled) { pdf.destroy(); releasePdfWorker(handle); return; }
       const element = scroller.current, { tops: oldTops, sizes: oldSizes, scale: oldScale } = layoutRef.current;
       if (element && docRef.current && oldTops.length) {
         // Same page, same spot within it, as before the rebuild.
@@ -566,14 +609,15 @@ function PdfViewer({ t, url, apiRef, onInverse, onMenu, downloadName }) {
         while (index + 1 < oldTops.length && oldTops[index + 1] <= element.scrollTop) index += 1;
         pending.current = { page: index, within: (element.scrollTop - oldTops[index]) / (oldSizes[index].h * oldScale), left: element.scrollLeft };
       }
-      const previous = docRef.current;
-      docRef.current = pdf;
+      const previous = docRef.current, previousWorker = workerRef.current;
+      docRef.current = pdf; workerRef.current = handle;
       setDoc({ pdf, sizes: list }); setError('');
-      if (previous) setTimeout(() => previous.destroy(), 1500);
-    }).catch(failure => { if (!cancelled) setError(messageOf(failure)); });
-    return () => { cancelled = true; if (!loaded) task.destroy(); };
+      // The old document stays on screen until the new one is ready; it owns its own worker.
+      if (previous) setTimeout(() => { previous.destroy(); releasePdfWorker(previousWorker); }, 1500);
+    }).catch(failure => { if (!cancelled) setError(messageOf(failure)); if (!loaded) releasePdfWorker(handle); });
+    return () => { cancelled = true; if (!loaded) { task.destroy(); releasePdfWorker(handle); } };
   }, [url]);
-  useEffect(() => () => { docRef.current?.destroy(); docRef.current = null; }, []);
+  useEffect(() => () => { docRef.current?.destroy(); releasePdfWorker(workerRef.current); docRef.current = null; workerRef.current = null; }, []);
 
   // Apply a pending scroll once the new layout is in place.
   useLayoutEffect(() => {
@@ -1088,10 +1132,10 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   const [reviewing, setReviewing] = useState(null);
   const [session, setSession] = useState({ id: '', reference: null, error: '' });
   const [running, setRunning] = useState(false);
-  const [layout, setLayout] = useState(() => ({ ...DEFAULT_LAYOUT, ...readStored(LAYOUT_KEY, {}), show: { ...DEFAULT_LAYOUT.show, ...(readStored(LAYOUT_KEY, {}).show || {}) } }));
+  const [layout, setLayout] = useState(() => normalizeLayout(readStored(LAYOUT_KEY, {})));
   const [mobilePane, setMobilePane] = useState('editor');
   const [autoCompile, setAutoCompile] = useState(() => readStored(AUTO_KEY, false));
-  const [archived, setArchived] = useState(() => new Set(readStored(ARCHIVED_KEY, [])));
+  const [archived, setArchived] = useState(() => { const saved = readStored(ARCHIVED_KEY, []); return new Set(Array.isArray(saved) ? saved.filter(id => typeof id === 'string') : []); });
   const [dialog, setDialog] = useState(null);
   const [compileMenu, setCompileMenu] = useState(false);
   const [drop, setDrop] = useState(null);
@@ -1674,6 +1718,29 @@ function CompileMenu({ t, project, texFiles, autoCompile, setAutoCompile, setEng
 
 /* ───────────── root ───────────── */
 
+// A render error inside the workspace would otherwise leave the whole Folio panel blank, with no
+// hint and no way out. Show what failed, and offer to drop the stored layout and start again.
+class WorkspaceBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { try { console.error('Folio workspace failed to render', error, info); } catch {} }
+  reset = () => {
+    try { localStorage.removeItem(LAYOUT_KEY); } catch {}
+    this.setState({ error: null });
+    this.props.onReset?.();
+  };
+  render() {
+    if (!this.state.error) return this.props.children;
+    return <div className="fo-empty" role="alert">
+      <h3>{this.props.t('renderFailed')}</h3>
+      <p className="fo-form-error">{messageOf(this.state.error)}</p>
+      <div className="fo-review-actions">
+        <button className="fo-btn is-primary" onClick={this.reset}>{this.props.t('resetLayout')}</button>
+      </div>
+    </div>;
+  }
+}
+
 function FolioApp({ services, t, renderSlot, SessionProvider }) {
   const locale = (typeof navigator !== 'undefined' && document.documentElement.lang) || navigator.language || 'en';
   const [projects, setProjects] = useState([]); const [loading, setLoading] = useState(true);
@@ -1684,7 +1751,7 @@ function FolioApp({ services, t, renderSlot, SessionProvider }) {
   const open = id => { setProjectId(id); store(PROJECT_KEY, id); if (!id) loadProjects(); };
   return <div className="fo-root">
     <style>{__FOLIO_CSS__}</style>
-    {projectId ? <Workspace key={projectId} t={t} locale={locale} services={services} projectId={projectId} onExit={() => open('')} renderSlot={renderSlot} SessionProvider={SessionProvider} toast={toast} />
+    {projectId ? <WorkspaceBoundary t={t} onReset={() => open('')}><Workspace key={projectId} t={t} locale={locale} services={services} projectId={projectId} onExit={() => open('')} renderSlot={renderSlot} SessionProvider={SessionProvider} toast={toast} /></WorkspaceBoundary>
       : <Library t={t} locale={locale} projects={projects} loading={loading} onOpen={open}
         onCreate={async (name, template) => { const project = await rpc('createProject', { name, template }); await loadProjects(); open(project.id); }}
         onRename={async (id, name) => { await rpc('updateProject', { projectId: id, name }); await loadProjects(); }}
