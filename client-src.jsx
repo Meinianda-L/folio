@@ -457,12 +457,22 @@ const PDF_VIEW_KEY = 'folio-pdf-view-v1';
 const PDF_PAD = 16, PDF_GAP = 12, CSS_UNITS = 96 / 72;
 const ZOOM_LEVELS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
 const clampZoom = zoom => Math.max(0.25, Math.min(5, zoom));
-let pdfWorker = null;
-function ensurePdfWorker() {
-  // The PDF.js worker ships inside client.js; a Blob URL runs it on the Harness origin.
-  if (pdfWorker) return;
-  pdfWorker = new Worker(URL.createObjectURL(new Blob([__PDF_WORKER__], { type: 'text/javascript' })), { type: 'module' });
-  pdfjs.GlobalWorkerOptions.workerPort = pdfWorker;
+let pdfWorkerUrl = null;
+// One worker per load, passed explicitly to getDocument. Sharing a single port through
+// GlobalWorkerOptions breaks as soon as a document is destroyed (switching dock, closing the
+// preview, rebuilding): pdf.js marks that shared PDFWorker `_pendingDestroy`, and the next
+// getDocument on the same port throws "PDFWorker.fromPort - the worker is being destroyed".
+// Passing the worker explicitly keeps the loading task from owning it, so destroying one
+// document can never mark another document's worker as pending.
+function createPdfWorker() {
+  // The PDF.js worker ships inside client.js; one Blob URL runs it on the Harness origin.
+  pdfWorkerUrl ||= URL.createObjectURL(new Blob([__PDF_WORKER__], { type: 'text/javascript' }));
+  const port = new Worker(pdfWorkerUrl, { type: 'module' });
+  return { port, worker: new pdfjs.PDFWorker({ port }) };
+}
+function releasePdfWorker(handle) {
+  try { handle?.worker?.destroy(); } catch {}
+  try { handle?.port?.terminate(); } catch {}
 }
 
 function PdfPage({ pdf, number, size, scale, near, marks }) {
@@ -535,6 +545,8 @@ function PdfViewer({ t, url, apiRef, onInverse, onMenu, downloadName }) {
   const [marks, setMarks] = useState(null);
   const [zoomMenu, setZoomMenu] = useState(null);
   const pending = useRef(null); const docRef = useRef(null); const liveScale = useRef(0);
+  // The worker that belongs to the document currently on screen, released together with it.
+  const workerRef = useRef(null);
   const { width, height } = useElementSize(scroller);
   useEffect(() => { store(PDF_VIEW_KEY, view); }, [view]);
 
@@ -551,14 +563,14 @@ function PdfViewer({ t, url, apiRef, onInverse, onMenu, downloadName }) {
   // Load each new build; keep showing the previous one until the new one is ready.
   useEffect(() => {
     if (!url) return;
-    ensurePdfWorker();
+    const handle = createPdfWorker();
     let cancelled = false, loaded = false;
-    const task = pdfjs.getDocument({ url, isEvalSupported: false, enableXfa: false });
+    const task = pdfjs.getDocument({ url, worker: handle.worker, isEvalSupported: false, enableXfa: false });
     task.promise.then(async pdf => {
       loaded = true;
       const list = [];
       for (let i = 1; i <= pdf.numPages; i += 1) { const viewport = (await pdf.getPage(i)).getViewport({ scale: 1 }); list.push({ w: viewport.width, h: viewport.height }); }
-      if (cancelled) { pdf.destroy(); return; }
+      if (cancelled) { pdf.destroy(); releasePdfWorker(handle); return; }
       const element = scroller.current, { tops: oldTops, sizes: oldSizes, scale: oldScale } = layoutRef.current;
       if (element && docRef.current && oldTops.length) {
         // Same page, same spot within it, as before the rebuild.
@@ -566,14 +578,15 @@ function PdfViewer({ t, url, apiRef, onInverse, onMenu, downloadName }) {
         while (index + 1 < oldTops.length && oldTops[index + 1] <= element.scrollTop) index += 1;
         pending.current = { page: index, within: (element.scrollTop - oldTops[index]) / (oldSizes[index].h * oldScale), left: element.scrollLeft };
       }
-      const previous = docRef.current;
-      docRef.current = pdf;
+      const previous = docRef.current, previousWorker = workerRef.current;
+      docRef.current = pdf; workerRef.current = handle;
       setDoc({ pdf, sizes: list }); setError('');
-      if (previous) setTimeout(() => previous.destroy(), 1500);
-    }).catch(failure => { if (!cancelled) setError(messageOf(failure)); });
-    return () => { cancelled = true; if (!loaded) task.destroy(); };
+      // The old document stays on screen until the new one is ready; it owns its own worker.
+      if (previous) setTimeout(() => { previous.destroy(); releasePdfWorker(previousWorker); }, 1500);
+    }).catch(failure => { if (!cancelled) setError(messageOf(failure)); if (!loaded) releasePdfWorker(handle); });
+    return () => { cancelled = true; if (!loaded) { task.destroy(); releasePdfWorker(handle); } };
   }, [url]);
-  useEffect(() => () => { docRef.current?.destroy(); docRef.current = null; }, []);
+  useEffect(() => () => { docRef.current?.destroy(); releasePdfWorker(workerRef.current); docRef.current = null; workerRef.current = null; }, []);
 
   // Apply a pending scroll once the new layout is in place.
   useLayoutEffect(() => {
