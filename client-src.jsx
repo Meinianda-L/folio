@@ -24,6 +24,37 @@ const FLOAT_MIN = { w: 280, h: 200 };
 const FLOAT_EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 const DEFAULT_LAYOUT = { files: 220, chat: 400, split: 0.5, show: { files: true, editor: true, pdf: true, chat: true } };
 
+// A stored layout may come from an older or edited build, or be hand-edited, so never trust its
+// shape: docks, sizes and the visible panes are all clamped to values the workspace can render.
+function normalizeLayout(stored) {
+  const saved = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+  const number = (value, fallback, min, max) => {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+  };
+  const dock = ['right', 'left', 'bottom', 'float'].includes(saved.dock) ? saved.dock : 'right';
+  const show = { ...DEFAULT_LAYOUT.show };
+  for (const pane of Object.keys(show)) if (typeof saved.show?.[pane] === 'boolean') show[pane] = saved.show[pane];
+  // The workspace always needs something to show: source, PDF and the assistant cannot all be off.
+  if (!show.editor && !show.pdf && !show.chat) show.editor = true;
+  const float = { w: number(saved.float?.w, 420, FLOAT_MIN.w, 10000), h: number(saved.float?.h, 560, FLOAT_MIN.h, 10000) };
+  // Only keep a position the user actually chose; otherwise the window places itself as before.
+  if (Number.isFinite(Number(saved.float?.x))) float.x = Number(saved.float.x);
+  if (Number.isFinite(Number(saved.float?.y))) float.y = Number(saved.float.y);
+  return {
+    ...DEFAULT_LAYOUT,
+    ...saved,
+    dock,
+    show,
+    files: number(saved.files, DEFAULT_LAYOUT.files, 150, 420),
+    chat: number(saved.chat, DEFAULT_LAYOUT.chat, FLOAT_MIN.w, 1200),
+    chatHeight: number(saved.chatHeight, 320, 140, 2000),
+    split: number(saved.split, DEFAULT_LAYOUT.split, 0.2, 0.8),
+    float,
+    lastDock: ['right', 'left', 'bottom', 'float'].includes(saved.lastDock) ? saved.lastDock : undefined
+  };
+}
+
 /* ───────────── small utilities ───────────── */
 
 const messageOf = error => error?.message || String(error);
@@ -460,10 +491,10 @@ const clampZoom = zoom => Math.max(0.25, Math.min(5, zoom));
 let pdfWorkerUrl = null;
 // One worker per load, passed explicitly to getDocument. Sharing a single port through
 // GlobalWorkerOptions breaks as soon as a document is destroyed (switching dock, closing the
-// preview, rebuilding): pdf.js marks that shared PDFWorker `_pendingDestroy`, and the next
-// getDocument on the same port throws "PDFWorker.fromPort - the worker is being destroyed".
-// Passing the worker explicitly keeps the loading task from owning it, so destroying one
-// document can never mark another document's worker as pending.
+// preview, rebuilding): pdf.js marks the shared PDFWorker `_pendingDestroy`, and the next
+// getDocument on that port throws "PDFWorker.fromPort - the worker is being destroyed". Passing
+// the worker explicitly keeps `task._worker` unset, so destroying one document can never mark
+// the worker of another as pending and poison the next load.
 function createPdfWorker() {
   // The PDF.js worker ships inside client.js; one Blob URL runs it on the Harness origin.
   pdfWorkerUrl ||= URL.createObjectURL(new Blob([__PDF_WORKER__], { type: 'text/javascript' }));
@@ -1101,10 +1132,10 @@ function Workspace({ t, locale, services, projectId, onExit, renderSlot, Session
   const [reviewing, setReviewing] = useState(null);
   const [session, setSession] = useState({ id: '', reference: null, error: '' });
   const [running, setRunning] = useState(false);
-  const [layout, setLayout] = useState(() => ({ ...DEFAULT_LAYOUT, ...readStored(LAYOUT_KEY, {}), show: { ...DEFAULT_LAYOUT.show, ...(readStored(LAYOUT_KEY, {}).show || {}) } }));
+  const [layout, setLayout] = useState(() => normalizeLayout(readStored(LAYOUT_KEY, {})));
   const [mobilePane, setMobilePane] = useState('editor');
   const [autoCompile, setAutoCompile] = useState(() => readStored(AUTO_KEY, false));
-  const [archived, setArchived] = useState(() => new Set(readStored(ARCHIVED_KEY, [])));
+  const [archived, setArchived] = useState(() => { const saved = readStored(ARCHIVED_KEY, []); return new Set(Array.isArray(saved) ? saved.filter(id => typeof id === 'string') : []); });
   const [dialog, setDialog] = useState(null);
   const [compileMenu, setCompileMenu] = useState(false);
   const [drop, setDrop] = useState(null);
@@ -1687,6 +1718,29 @@ function CompileMenu({ t, project, texFiles, autoCompile, setAutoCompile, setEng
 
 /* ───────────── root ───────────── */
 
+// A render error inside the workspace would otherwise leave the whole Folio panel blank, with no
+// hint and no way out. Show what failed, and offer to drop the stored layout and start again.
+class WorkspaceBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { try { console.error('Folio workspace failed to render', error, info); } catch {} }
+  reset = () => {
+    try { localStorage.removeItem(LAYOUT_KEY); } catch {}
+    this.setState({ error: null });
+    this.props.onReset?.();
+  };
+  render() {
+    if (!this.state.error) return this.props.children;
+    return <div className="fo-empty" role="alert">
+      <h3>{this.props.t('renderFailed')}</h3>
+      <p className="fo-form-error">{messageOf(this.state.error)}</p>
+      <div className="fo-review-actions">
+        <button className="fo-btn is-primary" onClick={this.reset}>{this.props.t('resetLayout')}</button>
+      </div>
+    </div>;
+  }
+}
+
 function FolioApp({ services, t, renderSlot, SessionProvider }) {
   const locale = (typeof navigator !== 'undefined' && document.documentElement.lang) || navigator.language || 'en';
   const [projects, setProjects] = useState([]); const [loading, setLoading] = useState(true);
@@ -1697,7 +1751,7 @@ function FolioApp({ services, t, renderSlot, SessionProvider }) {
   const open = id => { setProjectId(id); store(PROJECT_KEY, id); if (!id) loadProjects(); };
   return <div className="fo-root">
     <style>{__FOLIO_CSS__}</style>
-    {projectId ? <Workspace key={projectId} t={t} locale={locale} services={services} projectId={projectId} onExit={() => open('')} renderSlot={renderSlot} SessionProvider={SessionProvider} toast={toast} />
+    {projectId ? <WorkspaceBoundary t={t} onReset={() => open('')}><Workspace key={projectId} t={t} locale={locale} services={services} projectId={projectId} onExit={() => open('')} renderSlot={renderSlot} SessionProvider={SessionProvider} toast={toast} /></WorkspaceBoundary>
       : <Library t={t} locale={locale} projects={projects} loading={loading} onOpen={open}
         onCreate={async (name, template) => { const project = await rpc('createProject', { name, template }); await loadProjects(); open(project.id); }}
         onRename={async (id, name) => { await rpc('updateProject', { projectId: id, name }); await loadProjects(); }}

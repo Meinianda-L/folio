@@ -173,7 +173,7 @@ export function apply(ctx, config) {
       try { return JSON.stringify(await modelAction(action, args, exec.agent)); }
       catch (error) { return JSON.stringify({ ok: false, error: error.message }); }
     }
-  }));
+  }), { when: async ({ agent }) => Boolean(await projectOfSession(agent.id)) });
   ctx.effect(() => () => {
     for (const dispose of restricted.values()) dispose();
     restricted.clear();

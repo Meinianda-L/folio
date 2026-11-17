@@ -113,7 +113,7 @@ Folio 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harne
 
 ## 环境要求
 
-- **DeepSeek Harness** `0.2.1-rc.2` 系列（web profile）与 **Node.js 24+**。
+- **DeepSeek Harness** `0.2.1-rc.2` 或之后的 `0.2.x` 版本（Web 或 Desktop），以及 **Node.js 24+**。已在 0.2.1-rc.2（Web）上测试；有贡献者验证过 0.2.2-rc.3（Desktop）。
 - 启动 Harness 时 `PATH` 中有 **TeX 发行版**：
   - macOS：[MacTeX](https://www.tug.org/mactex/) / TeX Live（`pdflatex`、`xelatex`、`bibtex`、`biber`）。
   - Linux：`texlive-latex-base texlive-latex-recommended texlive-latex-extra texlive-xetex`；中文再加 `texlive-lang-chinese` 和中文字体。
@@ -122,23 +122,19 @@ Folio 是一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harne
 
 ## 安装
 
-```bash
-git clone https://github.com/Meinianda-L/folio.git
-cd folio
-npm install --omit=dev
-dsh plugin --profile web add "$(pwd)"
-```
-
-重启 `dsh web`，在 Harness 侧栏打开 **Folio 写作**。仓库已附带构建好的浏览器端文件 `client.js`，直接使用无需构建。
-
-之后更新：
+安装发布包。发布包已包含构建好的浏览器端文件，无需配置 Node 或构建。
 
 ```bash
-git pull
-npm install --omit=dev
+dsh plugin --profile web add https://github.com/Meinianda-L/folio/releases/download/v0.3.0/dsh-folio-0.3.0.tgz
 ```
 
-然后重启 Harness。若只更新了 `client.js`，刷新页面即可。
+**Harness 桌面版**：打开 **插件 → 添加插件**，粘贴同一个地址（或在上面的命令中改用 `--profile desktop`）。
+
+然后完全退出并重新打开 Harness，在侧栏打开 **Folio 写作**。更新时，从 [Releases 页面](https://github.com/Meinianda-L/folio/releases) 以同样方式安装新版本即可。
+
+Folio 使用 Harness 自带的 DeepSeek Harness 依赖包，不会另装一份。
+
+如需从源码运行，见[开发](#开发)。
 
 ## 使用
 
@@ -214,9 +210,12 @@ Harness 网页端                              Harness 宿主（Node）
 ## 开发
 
 ```bash
-npm install           # 包含构建工具链
+git clone https://github.com/Meinianda-L/folio.git && cd folio
+npm install           # 包含构建工具链，以及测试用的 Harness 依赖包
 npm run build         # 把 client-src.jsx 与 client.css 打包成 client.js
 npm test              # 领域、建议与宿主测试（本机装有 pdfLaTeX/BibTeX 时会真实编译）
+npm pack              # 生成发布包 dsh-folio-<版本>.tgz
+dsh plugin --profile web add "$(pwd)/dsh-folio-<版本>.tgz"   # 在本机试装发布包
 ```
 
 | 文件 | 作用 |

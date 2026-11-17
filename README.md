@@ -113,7 +113,7 @@ Open **TeX environment** from the library (the TeX status pill) or the Compile m
 
 ## Requirements
 
-- **DeepSeek Harness** `0.2.1-rc.2` series (web profile) and **Node.js 24+**.
+- **DeepSeek Harness** `0.2.1-rc.2` or a later `0.2.x` release, Web or Desktop, and **Node.js 24+**. Tested on 0.2.1-rc.2 (Web); a contributor verified 0.2.2-rc.3 (Desktop).
 - A **TeX distribution** on the `PATH` that Harness starts with:
   - macOS: [MacTeX](https://www.tug.org/mactex/) / TeX Live (`pdflatex`, `xelatex`, `bibtex`, `biber`).
   - Linux: `texlive-latex-base texlive-latex-recommended texlive-latex-extra texlive-xetex`; for Chinese add `texlive-lang-chinese` and CJK fonts.
@@ -122,23 +122,19 @@ Open **TeX environment** from the library (the TeX status pill) or the Compile m
 
 ## Installation
 
-```bash
-git clone https://github.com/Meinianda-L/folio.git
-cd folio
-npm install --omit=dev
-dsh plugin --profile web add "$(pwd)"
-```
-
-Restart `dsh web` and open **Folio** in the Harness sidebar. The repository ships the built browser bundle (`client.js`), so no build step is needed to use it.
-
-To update later:
+Install the release package. It includes the built browser bundle, so no Node setup or build is needed.
 
 ```bash
-git pull
-npm install --omit=dev
+dsh plugin --profile web add https://github.com/Meinianda-L/folio/releases/download/v0.3.0/dsh-folio-0.3.0.tgz
 ```
 
-Then restart Harness. If only `client.js` changed, reloading the page is enough.
+In **Harness Desktop**, open **Plugins → Add plugin** and paste the same URL (or use `--profile desktop` with the command above).
+
+Then fully quit and reopen Harness, and open **Folio** in the sidebar. To update, install the newer release from the [Releases page](https://github.com/Meinianda-L/folio/releases) the same way.
+
+Folio uses the DeepSeek Harness packages that Harness itself provides; it does not install its own copies.
+
+To run from source instead, see [Development](#development).
 
 ## Usage
 
@@ -214,9 +210,12 @@ Builds run one at a time (at most 4 queued) in a temporary snapshot of the proje
 ## Development
 
 ```bash
-npm install           # includes the build toolchain
+git clone https://github.com/Meinianda-L/folio.git && cd folio
+npm install           # includes the build toolchain and test copies of the Harness packages
 npm run build         # bundles client-src.jsx + client.css into client.js
 npm test              # domain, proposals and host tests (real pdfLaTeX/BibTeX when installed)
+npm pack              # builds dsh-folio-<version>.tgz, the release package
+dsh plugin --profile web add "$(pwd)/dsh-folio-<version>.tgz"   # try the package locally
 ```
 
 | File | Role |
